@@ -1,0 +1,181 @@
+{
+  "Comment": "State Machine for DLC Override Service",
+  "StartAt": "Try",
+  "States": {
+    "Try": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Log Request",
+          "States": {
+            "Internal Fail": {
+              "Type": "Fail",
+              "Cause": "Step Create LC Override Policy or Deploy LC Override Policy has returned a non 200 code."
+            },
+            "Internal Success": {
+              "Type": "Pass",
+              "End": true
+            },
+            "Log Request": {
+              "Type": "Pass",
+              "Next": "Create LC Override Policy",
+              "Parameters": {
+                "action": "createDLCPolicy",
+                "request.$": "$"
+              }
+            },
+            "Create LC Override Policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "If Policy Creation Succeeded",
+              "ResultPath": "$.createDLCPolicyTaskResult",
+              "ResultSelector": {
+                "Payload.$": "$.Payload"
+              }
+            },
+            "If Policy Creation Succeeded": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Not": {
+                    "Variable": "$.createDLCPolicyTaskResult.Payload.statusCode",
+                    "NumericEquals": 200
+                  },
+                  "Next": "Internal Fail"
+                }
+              ],
+              "Default": "Policy Deployment Wait"
+            },
+            "Policy Deployment Wait": {
+              "Type": "Wait",
+              "Next": "Prepare Deploy Policy Request",
+              "TimestampPath": "$.createDLCPolicyTaskResult.Payload.deploy_start_datetime"
+            },
+            "Prepare Deploy Policy Request": {
+              "Type": "Pass",
+              "Next": "Deploy LC Override Policy",
+              "Parameters": {
+                "action": "deployDLCPolicy",
+                "request.$": "$.request",
+                "policyID.$": "$.createDLCPolicyTaskResult.Payload.policyID"
+              }
+            },
+            "Deploy LC Override Policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "If Policy Deployment Succeeded",
+              "ResultSelector": {
+                "Payload.$": "$.Payload"
+              },
+              "ResultPath": "$.deployDLCPolicyTaskResult"
+            },
+            "If Policy Deployment Succeeded": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Not": {
+                    "Variable": "$.deployDLCPolicyTaskResult.Payload.statusCode",
+                    "NumericEquals": 200
+                  },
+                  "Next": "Internal Fail"
+                }
+              ],
+              "Default": "Internal Success"
+            }
+          }
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Runtime"
+          ],
+          "Next": "Build Failure Message"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Build Failure Message"
+        }
+      ],
+      "Next": "Success"
+    },
+    "Build Failure Message": {
+      "Type": "Pass",
+      "Next": "Failure Handler",
+      "Parameters": {
+        "errorMessage": {
+            "subject": "Alarm: dlc-override-processors-sm Failed",
+            "reason.$": "$.Error",
+            "stackTrace.$": "$.Cause",
+            "time.$": "$$.State.EnteredTime",
+            "priority": "P1",
+            "accountId": "None"
+        }
+      }
+    },
+    "Failure Handler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "Subject": "Alarm: DLC Override State Machine Failed",
+        "Message.$": "States.JsonToString($.errorMessage)",
+        "MessageAttributes": {
+          "alias": {
+            "DataType": "String",
+            "StringValue.$": "$.errorMessage.subject"
+          },
+          "tags": {
+            "DataType": "String",
+            "StringValue": "MSI, Load Control"
+          },
+          "priority": {
+            "DataType": "String",
+            "StringValue.$": "$.errorMessage.priority"
+          }
+        },
+        "TopicArn": "${self:custom.SUPPORT_SNS_ARN}"
+      },
+      "Next": "Fail"
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Fail": {
+      "Type": "Fail"
+    }
+  }
+}

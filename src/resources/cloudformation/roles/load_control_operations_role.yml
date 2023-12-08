@@ -1,0 +1,57 @@
+Resources:
+  LoadControlOperationsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: LoadControlOperationsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: "SupportPublish"
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - ${self:custom.SUPPORT_SNS_ARN}
+              - Sid: "PnetSecretAccess"
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:ListSecretVersionIds
+                Resource:
+                  - ${self:custom.PNET_SECRET_ARN_PATTERN}
+              - Sid: "PnetSessionDDBAccess"
+                Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: ${self:custom.PNET_SESSION_TABLE_ARN}
+              - Sid: "RequestTrackerDDBAccess"
+                Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - ${self:custom.REQUEST_TRACKER_TABLE_ARN}
+                  - !Sub '${self:custom.REQUEST_TRACKER_TABLE_ARN}/index/GSI3'
+              - Sid: "SubscriptionKdsWriteOnly"
+                Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: ${self:custom.KINESIS_DATA_STREAM_ARN}

@@ -1,0 +1,31 @@
+Resources:
+  LoadControlGetRequestStatusRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: LoadControlGetRequestStatusPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: "SupportPublish"
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - ${self:custom.SUPPORT_SNS_ARN}
+              - Sid: "RequestTrackerReadOnly"
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: ${self:custom.REQUEST_TRACKER_TABLE_ARN}

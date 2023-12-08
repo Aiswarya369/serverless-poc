@@ -1,0 +1,395 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "Parallel",
+  "States": {
+    "Parallel": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Evaluate request",
+          "States": {
+            "Evaluate request": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "evaluateRequest"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                },
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "BackoffRate": 2,
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 5
+                }
+              ],
+              "Next": "Replace policy?",
+              "ResultSelector": {
+                "payload.$": "$.Payload"
+              },
+              "ResultPath": "$.evaluated_request"
+            },
+            "Replace policy?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.evaluated_request.payload.replace",
+                  "StringMatches": "replace_first_request",
+                  "Next": "Create replacement policy"
+                },
+                {
+                  "Variable": "$.evaluated_request.payload.replace",
+                  "StringMatches": "replace_second_request",
+                  "Next": "Undeploy policy"
+                }
+              ],
+              "Default": "Cancel policy"
+            },
+            "Undeploy policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "undeployPolicy"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "Create new policy"
+            },
+            "Create replacement policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "createReplacementPolicy"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                },
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "BackoffRate": 2,
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 5
+                }
+              ],
+              "Next": "Deploy replacement policy"
+            },
+            "Deploy replacement policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "deployReplacementPolicy"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                },
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "BackoffRate": 2,
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 5
+                }
+              ],
+              "ResultSelector": {
+                "payload.$": "$.Payload"
+              },
+              "ResultPath": "$.stopped_datetime",
+              "Next": "Cancellation complete"
+            },
+            "Cancellation complete": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "cancellationComplete"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                },
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "BackoffRate": 2,
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 5
+                }
+              ],
+              "End": true
+            },
+            "Cancel policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "cancelPolicy"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                },
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "BackoffRate": 2,
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 5
+                }
+              ],
+              "Next": "Cancellation complete",
+              "ResultSelector": {
+                "payload.$": "$.Payload"
+              },
+              "ResultPath": "$.stopped_datetime"
+            },
+            "Create new policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "createNewPolicy"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "Deploy new policy"
+            },
+            "Deploy new policy": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "Payload": {
+                  "payload.$": "$",
+                  "action": "deployNewPolicy"
+                },
+                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "ResultSelector": {
+                "payload.$": "$.Payload"
+              },
+              "ResultPath": "$.stopped_datetime",
+              "Next": "Cancellation complete"
+            }
+          }
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Runtime"
+          ],
+          "Next": "Failure handler",
+          "ResultPath": "$.error"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Failure handler",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "Success",
+      "Parameters": {
+        "request.$": "$"
+      }
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Failure handler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "Payload": {
+          "payload.$": "$",
+          "action": "failure"
+        },
+        "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-cancel-override-statemachine-fn"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "BackoffRate": 2,
+          "IntervalSeconds": 2,
+          "MaxAttempts": 5
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Runtime"
+          ],
+          "Next": "Build Failure Message"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Build Failure Message"
+        }
+      ],
+      "Next": "Build Failure Message"
+    },
+    "Build Failure Message": {
+      "Type": "Pass",
+      "Next": "Publish Failure",
+      "Parameters": {
+        "errorMessage": {
+            "subject": "Alarm: DLC Cancel Override State Machine Failed",
+            "reason.$": "$.Error",
+            "stackTrace.$": "$.Cause",
+            "time.$": "$$.State.EnteredTime",
+            "accountId": "None",
+            "priority": "P1"
+        }
+      }
+    },
+    "Publish Failure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "Subject": "Alarm: dlc-cancel-override-processors-sm Failed",
+        "Message.$": "States.JsonToString($.errorMessage)",
+        "MessageAttributes": {
+          "alias": {
+            "DataType": "String",
+            "StringValue.$": "$.errorMessage.subject"
+          },
+          "tags": {
+            "DataType": "String",
+            "StringValue": "MSI, Load Control"
+          },
+          "priority": {
+            "DataType": "String",
+            "StringValue.$": "$.errorMessage.priority"
+          }
+        },
+        "TopicArn": "${self:custom.SUPPORT_SNS_ARN}"
+      },
+      "Next": "Fail"
+    },
+    "Fail": {
+      "Type": "Fail"
+    }
+  }
+}

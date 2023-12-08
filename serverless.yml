@@ -1,0 +1,168 @@
+org: aiswarya1996
+app: load-control
+service: load-control-grouping
+
+frameworkVersion: '3'
+
+custom:
+  REQUEST_TRACKER_TABLE_NAME: "request-tracker-ddb"
+  REQUEST_TRACKER_TABLE_ARN: "arn:aws:dynamodb:ap-south-1:752671163579:table/${self:custom.REQUEST_TRACKER_TABLE_NAME}"
+
+  SUBSCRIPTION_TABLE_NAME: "subscriptions-ddb"
+  SUBSCRIPTION_TABLE_ARN: "arn:aws:dynamodb:ap-south-1:752671163579:table/${self:custom.SUBSCRIPTION_TABLE_NAME}"
+
+  OVERRIDE_THROTTLING_CONFIG: ${file(serverless-dev.yml):override_throttling_config}
+  XRAY_TRACING_ENABLED: ${file(serverless-dev.yml):xray_tracing_enabled}
+
+  CONTIGUOUS_START_BUFFER_MINUTES: 5
+  OPPOSITE_SWITCH_DIRECTION_BACKOFF: 5
+
+  SUPPORT_SNS_ARN: arn:aws:sns:${self:provider.region}:${aws:accountId}:poc-support-sns
+
+  pythonRequirements:
+    invalidateCaches: true
+    layer: true
+    dockerizePip: false
+    noDeploy:
+      - pytest
+    slim: true
+    slimPatterns:
+      - '**/pandas/tests*'  # Remove the /pandas/tests directory.
+
+  prune: # remove older versions of lambda functions.
+    includeLayers: true
+    automatic: true
+    number: 5
+
+provider:
+  name: aws
+  runtime: python3.8
+  region: ap-south-1
+  layers:
+    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:10
+    - arn:aws:lambda:ap-south-1:752671163579:layer:poc-api:2
+    - arn:aws:lambda:ap-south-1:752671163579:layer:poc-aws:1
+    - arn:aws:lambda:ap-south-1:752671163579:layer:poc-common:1
+    - arn:aws:lambda:ap-south-1:752671163579:layer:zeep:1
+  tracing:
+    lambda: ${self:custom.XRAY_TRACING_ENABLED}
+
+package:
+  individually: false
+  patterns:
+    - "!./**"
+    - "./src/**/*.*"
+
+functions:
+  dlc-override-statemachine-fn:
+    handler: src/lambdas/dlc_override_statemachine_fn.lambda_handler
+    name: "load-control-statemachine-fn"
+    description: "State machine handler for dlc override requests."
+    memorySize: 1024 # optional, in MB, default is 1024
+    timeout: 600 # optional, in seconds, default is 6
+    environment:
+      REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
+      DEFAULT_OVERRIDE_DURATION_MINUTES: 30
+      CONTIGUOUS_START_BUFFER_MINUTES: ${self:custom.CONTIGUOUS_START_BUFFER_MINUTES}
+      OPPOSITE_SWITCH_DIRECTION_BACKOFF: ${self:custom.OPPOSITE_SWITCH_DIRECTION_BACKOFF}
+  dlc-override-apigw-fn:
+    handler: src/lambdas/dlc_override_apigw_fn.lambda_handler
+    name: "load-control-apigw-fn"
+    description: "API gateway handler for dlc override requests."
+    memorySize: 1024 # optional, in MB, default is 1024
+    timeout: 25 # optional, in seconds, default is 6
+    events:
+      - http:
+          path: /service/lc/load/{subscription_id+}
+          method: post
+    environment:
+      REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
+      SUBSCRIPTION_TABLE_NAME: ${self:custom.SUBSCRIPTION_TABLE_NAME}
+      OVERRIDE_THROTTLING_QUEUE: load-control-throttle-queue
+      DEFAULT_OVERRIDE_DURATION_MINUTES: 30
+  dlc-override-throttle-fn:
+    handler: src/lambdas/dlc_override_throttle_fn.lambda_handler
+    name: "load-control-throttle-fn"
+    description: "Throttling enforcer for dlc override requests."
+    memorySize: 2048
+    timeout: 180  # 3 minutes
+    events:
+      - sqs:
+          arn: arn:aws:sqs:ap-south-1:752671163579:load-control-throttle-queue
+          maximumConcurrency: ${self:custom.OVERRIDE_THROTTLING_CONFIG.queue_config.max_concurrency}
+          batchSize: ${self:custom.OVERRIDE_THROTTLING_CONFIG.queue_config.batch_size}
+          maximumBatchingWindow: ${self:custom.OVERRIDE_THROTTLING_CONFIG.queue_config.batch_window}
+          functionResponseType: ReportBatchItemFailures
+    environment:
+      SUBSCRIPTION_TABLE_NAME: ${self:custom.SUBSCRIPTION_TABLE_NAME}
+      REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
+      RATE_LIMIT_CALLS: ${self:custom.OVERRIDE_THROTTLING_CONFIG.lambda_rate_limit_config.calls_limit}
+      RATE_LIMIT_PERIOD_SEC: ${self:custom.OVERRIDE_THROTTLING_CONFIG.lambda_rate_limit_config.period_sec}
+      DEFAULT_OVERRIDE_DURATION_MINUTES: 30
+      DLC_OVERRIDE_SM_ARN:
+        Ref: DLCOverrideStateMachine
+  dlc-get-request-status:
+    handler: src/lambdas/dlc_get_request_status.lambda_handler
+    name: "load-control-get-request-status"
+    description: "API gateway handler for dlc get status requests."
+    memorySize: 1024 # optional, in MB, default is 1024
+    timeout: 25 # optional, in seconds, default is 6
+    events:
+      - http:
+          path: /service/lc/status/{correlation_id+}
+          method: get
+          integration: lambda-proxy
+    environment:
+      REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
+  dlc-cancel-override-apigw-fn:
+    handler: src/lambdas/dlc_cancel_override_apigw_fn.lambda_handler
+    name: "load-control-cancel-override-apigw-fn"
+    description: "API gateway handler for cancel dlc override requests."
+    memorySize: 1024 # optional, in MB, default is 1024
+    timeout: 25 # optional, in seconds, default is 6
+    events:
+      - http:
+          path: /service/lc/cancel/{sub_id}
+          method: delete
+          integration: lambda-proxy
+          request:
+            parameters:
+              paths:
+                sub_id: true
+              querystrings:
+                correlation_id: true
+                subscriber: true
+    environment:
+      REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
+      SUBSCRIPTION_TABLE_NAME: ${self:custom.SUBSCRIPTION_TABLE_NAME}
+      DLC_OVERRIDE_SM_ARN:
+        Ref: DLCOverrideStateMachine
+      DLC_CANCEL_OVERRIDE_SM_ARN:
+        Ref: DLCCancelOverrideStateMachine
+  dlc-cancel-override-statemachine-fn:
+    handler: src/lambdas/dlc_cancel_override_statemachine_fn.lambda_handler
+    name: "load-control-cancel-override-statemachine-fn"
+    description: "State machine handler for cancelling dlc override requests."
+    memorySize: 1024 # optional, in MB, default is 1024
+    timeout: 25 # optional, in seconds, default is 6
+    environment:
+      DLC_OVERRIDE_SM_EXECUTION_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:poc-processors-sm
+      REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
+
+stepFunctions:
+  stateMachines:
+    DLCOverrideSM:
+      id: DLCOverrideStateMachine
+      name: poc-processors-sm
+      definition: ${file(src/resources/sm/dlc-override-sm.json)}
+    DLCCancelOverrideSM:
+      id: DLCCancelOverrideStateMachine
+      name: poc-cancel-override-processors-sm
+      definition: ${file(src/resources/sm/dlc-cancel-override-sm.json)}
+
+
+plugins:
+  - serverless-python-requirements
+  - serverless-plugin-common-excludes
+  - serverless-step-functions
+  - serverless-prune-plugin

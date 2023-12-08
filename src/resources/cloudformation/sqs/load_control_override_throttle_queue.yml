@@ -1,0 +1,60 @@
+Resources:
+  OverrideThrottleDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ${self:custom.NAME_PREFIX}-dlc-override-requests-throttler-sqs-dlq
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  OverrideThrottleQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ${self:custom.NAME_PREFIX}-dlc-override-requests-throttler-sqs
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 1209600 # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OverrideThrottleDLQ.Arn
+        maxReceiveCount: 2 # 2 Retries
+
+  OverrideThrottleDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${OverrideThrottleDLQ.QueueName}-alarm
+      AlarmDescription: !Sub Triggered when messages appear in ${OverrideThrottleDLQ.QueueName}.
+      AlarmActions:
+        - ${self:custom.SUPPORT_SNS_ARN}
+      Metrics:
+        - Expression: "max-min"
+          Id: "change"
+          Label: "ChangeInAmountVisible"
+          ReturnData: true
+        - Id: "min"
+          Label: "MessagesVisibleMin"
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: QueueName
+                  Value: !GetAtt OverrideThrottleDLQ.QueueName
+              MetricName: ApproximateNumberOfMessagesVisible
+              Namespace: "AWS/SQS"
+            Period: 900 # evaluate maximum over period of 15 min.
+            Stat: Minimum
+            Unit: Count
+          ReturnData: false
+        - Id: "max"
+          Label: "MessagesVisibleMax"
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: QueueName
+                  Value: !GetAtt OverrideThrottleDLQ.QueueName
+              MetricName: ApproximateNumberOfMessagesVisible
+              Namespace: "AWS/SQS"
+            Period: 900 # evaluate maximum over period of 15 min.
+            Stat: Maximum
+            Unit: Count
+          ReturnData: false
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching

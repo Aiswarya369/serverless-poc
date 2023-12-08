@@ -1,0 +1,60 @@
+Resources:
+  DlcOverrideThrottleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: LoadControlOverrideApiGwPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: "SupportPublish"
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - ${self:custom.SUPPORT_SNS_ARN}
+              - Sid: "DynamoReadOnly"
+                Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub '${self:custom.SUBSCRIPTION_TABLE_ARN}/index/subId-index'
+                  - !Sub '${self:custom.REQUEST_TRACKER_TABLE_ARN}/index/GSI3'
+              - Sid: "DynamoReadWriteAccess"
+                Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: ${self:custom.REQUEST_TRACKER_TABLE_ARN}
+              - Sid: "OverrideSMAccess"
+                Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref DLCOverrideStateMachine
+              - Sid: "OverrideThrottleQueueAccess"
+                Effect: Allow
+                Action:
+                  - SQS:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                Resource:
+                  - !GetAtt OverrideThrottleQueue.Arn
+              - Sid: "SubscriptionKdsWriteOnly"
+                Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: ${self:custom.KINESIS_DATA_STREAM_ARN}
