@@ -7,7 +7,7 @@ from typing import Union, Optional
 import boto3 as boto3
 from botocore.client import BaseClient
 from botocore.errorfactory import ClientError
-from msi_common import Stage
+from src.model.enums import Stage
 from src.config.config import AppConfig
 from src.statemachine.state_machine_handler import StateMachineHandler
 from src.utils.request_validator import RequestValidator

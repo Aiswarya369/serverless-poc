@@ -9,7 +9,7 @@ from typing import Tuple, Optional
 from boto3.dynamodb.conditions import Key, Attr
 from botocore.client import BaseClient
 
-from msi_common import Stage, HeadEnd
+from src.model.enums import Stage, HeadEnd
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger: Logger = logging.getLogger(name=__name__)

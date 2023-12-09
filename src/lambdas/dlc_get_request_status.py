@@ -6,7 +6,7 @@ import boto3
 from typing import Union
 from botocore.client import BaseClient
 
-from cresconet_aws.support import send_message_to_support, SupportMessage, alert_on_exception
+# from cresconet_aws.support import send_message_to_support, SupportMessage, alert_on_exception
 
 from src.config.config import AppConfig
 
@@ -115,9 +115,9 @@ def job_entry(event: dict) -> dict:
     except Exception as e:
         logger.exception(str(e))
         subject = GET_REQUEST_STATUS_ALERT_FORMAT.format(hint="Internal Error")
-        support_message = SupportMessage(reason="Request status query failed with internal error", subject=subject,
-                                         stack_trace=repr(e), tags=AppConfig.LOAD_CONTROL_TAGS)
-        send_message_to_support(support_message, correlation_id=correlation_id)
+        # support_message = SupportMessage(reason="Request status query failed with internal error", subject=subject,
+        #                                  stack_trace=repr(e), tags=AppConfig.LOAD_CONTROL_TAGS)
+        # send_message_to_support(support_message, correlation_id=correlation_id)
         return format_response(HTTP_INTERNAL_ERROR, {
             "message": f"Request status query failed with internal error: {str(e)}",
             "correlation_id": correlation_id

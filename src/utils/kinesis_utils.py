@@ -5,7 +5,7 @@ import uuid
 
 import boto3
 from botocore.client import BaseClient
-from msi_common import Stage, EventType
+from src.model.enums import Stage, EventType
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(name="KinesisUtils")

@@ -8,12 +8,12 @@ from typing import Any, Dict, Tuple, Optional
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from functools import lru_cache
-from msi_common import Stage
+from src.model.enums import Stage
 from ratelimiter import RateLimiter
 from botocore.client import BaseClient
 from src.config.config import AppConfig
 from aws_lambda_powertools import Tracer
-from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
+# from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
 from aws_lambda_powertools.utilities.batch import BatchProcessor, process_partial_response, EventType
 from aws_lambda_powertools.utilities.data_classes.sqs_event import SQSRecord
 from aws_lambda_powertools.utilities.typing import LambdaContext

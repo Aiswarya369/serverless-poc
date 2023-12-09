@@ -5,7 +5,7 @@ from logging import Logger
 from datetime import datetime
 from typing import List
 
-from msi_common import Stage
+from src.model.enums import Stage
 
 from src.model.LCMeterEvent import LCMeterEvent
 from src.utils.request_validator import ValidationError

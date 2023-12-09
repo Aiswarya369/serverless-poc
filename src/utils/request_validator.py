@@ -8,7 +8,7 @@ from typing import Tuple, Optional, List
 import boto3
 from boto3.dynamodb.conditions import Key, Attr, Not
 from botocore.client import BaseClient
-from msi_common import Stage
+from src.model.enums import Stage
 
 from src.utils.aws_utils import get_subscription
 

@@ -1,5 +1,5 @@
-from msi_common import BaseMeterEvent, EventType, Stage
-
+from src.model.enums import EventType, Stage
+from src.model.BaseMeterEvent import BaseMeterEvent
 
 class LCMeterEvent(BaseMeterEvent):
     """
