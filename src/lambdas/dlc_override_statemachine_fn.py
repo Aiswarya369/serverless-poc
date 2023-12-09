@@ -6,12 +6,18 @@ from logging import Logger
 from typing import Optional
 import uuid
 import boto3
+
 # import cresconet_aws.secrets_manager as cn_secret_manager
 from aws_lambda_powertools import Tracer
 from botocore.client import BaseClient
+
 # from cresconet_aws.support import alert_on_exception
 from src.model.enums import Stage
-# from msi_policynet_client.client import PolicyNetClient
+from src.utils.client import (
+    create_lc_override_schedule_policy,
+    deploy_policy,
+    replace_lc_override_schedule_policy,
+)
 
 from src.config.config import AppConfig
 from src.lambdas.dlc_event_helper import assemble_error_message, assemble_event_payload
@@ -60,7 +66,7 @@ DYNAMO_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)
 
 # PolicyNet client as a global variable.
 # This avoids creating it every time the lambda is being called as it takes time to load up the WSDL.
-policynet_client = None
+# PolicyNetClient = None
 
 
 def report_errors(correlation_id, errors) -> dict:
@@ -118,20 +124,13 @@ def create_policy(correlation_id: str, request: dict) -> dict:
     # with event datetimes.
     now: datetime = datetime.now(timezone.utc)
 
-    # policy_name, response = policynet_client.create_lc_override_schedule_policy(
-    #     meter_serials=meter_serial,
-    #     start_datetime=start_datetime,
-    #     turn_off=turn_off,
-    #     duration=duration,
-    #     replace=replace,
-    # )
-
-    policy_name = str(uuid.uuid4())
-    response = {
-        "message": "Direct load control override policy created successfully",
-        "policyID": str(uuid.uuid4()),
-        "statusCode": 200,
-    }
+    policy_name, response = create_lc_override_schedule_policy(
+        meter_serials=meter_serial,
+        start_datetime=start_datetime,
+        turn_off=turn_off,
+        duration=duration,
+        replace=replace,
+    )
 
     status_code: int = response["statusCode"]
     message: str = response["message"]
@@ -216,12 +215,12 @@ def extend_policy(
     # with event datetimes.
     now: datetime = datetime.now(timezone.utc)
 
-    policy_name = str(uuid.uuid4())
-    response = {
-        "message": "Direct load control override policy created successfully",
-        "policyID": str(uuid.uuid4()),
-        "statusCode": 200,
-    }
+    policy_name, response = replace_lc_override_schedule_policy(
+        meter_serials=request["switch_addresses"],
+        start_datetime=terminal_start,
+        turn_off=turn_off,
+        duration=duration,
+    )
 
     status_code: int = response["statusCode"]
     message: str = response["message"]
@@ -442,9 +441,7 @@ def handle_deploy_policy(event: dict):
     now: datetime = datetime.now(timezone.utc)
     policy_id: int = event["policyID"]
 
-    # response: dict = policynet_client.deploy_policy(policy_id)
-
-    response = {"message": "Policy 201714 deployed successfully", "statusCode": 200}
+    response: dict = deploy_policy(policy_id)
 
     status_code: int = response["statusCode"]
     message: str = response["message"]
@@ -484,7 +481,7 @@ def lambda_handler(event: dict, _):
     :param _: Lambda context (not used)
     :return:
     """
-    global policynet_client
+    global PolicyNetClient
 
     logger.info("----------------")
     logger.info("Direct Load Control State Machine override running...")
@@ -505,20 +502,20 @@ def lambda_handler(event: dict, _):
     # Get PolicyNet credentials; set in our PolicyNet client object.
     # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(AppConfig.PNET_AUTH_DETAILS_SECRET_ID)
 
-    # if not policynet_client:
+    # if not PolicyNetClient:
     #     url = pnet_auth_details['pnet_url']
-    #     policynet_client = PolicyNetClient(f"{url}/PolicyNet.wsdl", url, DYNAMO_RESOURCE,
+    #     PolicyNetClient = PolicyNetClient(f"{url}/PolicyNet.wsdl", url, DYNAMO_RESOURCE,
     #                                        session_table=PNET_SESSION_TABLE,
     #                                        session_lifetime=PNET_SESSION_LIFETIME_SECONDS)
-    #     policynet_client.set_credentials(pnet_auth_details['pnet_username'], pnet_auth_details['pnet_password'])
+    #     PolicyNetClient.set_credentials(pnet_auth_details['pnet_username'], pnet_auth_details['pnet_password'])
     #     logger.debug("Set credentials in PolicyNet client")
 
     if action == SupportedOverrideSMActions.CREATE_DLC_POLICY.value:
         response = handle_create_policy(request)
     elif action == SupportedOverrideSMActions.DEPLOY_DLC_POLICY.value:
         response = handle_deploy_policy(event)
-    elif action == SupportedOverrideSMActions.LOGOUT_PNET.value:
-        policynet_client.logout()
+        # elif action == SupportedOverrideSMActions.LOGOUT_PNET.value:
+        # PolicyNetClient.logout()
 
         response: dict = {
             "statusCode": HTTP_SUCCESS,

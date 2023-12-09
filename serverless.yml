@@ -36,10 +36,10 @@ custom:
 
 provider:
   name: aws
-  runtime: python3.8
+  runtime: python3.9
   region: ap-south-1
   layers:
-    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:11
+    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:12
 
   tracing:
     lambda: ${self:custom.XRAY_TRACING_ENABLED}
