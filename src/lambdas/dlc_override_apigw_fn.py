@@ -196,10 +196,16 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     override_status: str = request["status"]
 
     # There should only be one meter serial supplied in "switch_addresses", as per validation.
+    # switch_addresses: Union[str, List[str]] = request["switch_addresses"]
+    # meter_serial_number: str = (
+    #     switch_addresses[0] if type(switch_addresses) == list else switch_addresses
+    # )
+
     switch_addresses: Union[str, List[str]] = request["switch_addresses"]
     meter_serial_number: str = (
         switch_addresses[0] if type(switch_addresses) == list else switch_addresses
     )
+    request["switch_addresses"] = meter_serial_number
 
     # Create initial request tracker records.
     # We can't add the request start and end dates to the tracker header record here because we need to validate
@@ -278,7 +284,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any):
     """
     try:
         logger.info("Lambda to perform direct Load Control API override being run now")
-        logger.debug(f"Event: %s", str(event))
+        logger.info(f"Event: %s", str(event))
         return job_entry(event)
     except Exception as e:
         logger.exception(

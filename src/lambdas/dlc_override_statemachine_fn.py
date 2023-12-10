@@ -6,6 +6,7 @@ from logging import Logger
 from typing import Optional
 import uuid
 import boto3
+from functools import partial
 
 # import cresconet_aws.secrets_manager as cn_secret_manager
 from aws_lambda_powertools import Tracer
@@ -24,7 +25,11 @@ from src.lambdas.dlc_event_helper import assemble_error_message, assemble_event_
 from src.model.sm_actions import SupportedOverrideSMActions
 from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.request_validator import RequestValidator
-from src.utils.tracker_utils import update_tracker, get_contiguous_request
+from src.utils.tracker_utils import (
+    update_tracker,
+    get_contiguous_request,
+    new_get_contiguous_request,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -99,7 +104,132 @@ def report_errors(correlation_id, errors) -> dict:
     }
 
 
-def create_policy(correlation_id: str, request: dict) -> dict:
+def create_policy_update_tracker(
+    data=None, event_datetime=None, response=None, policy_name=None, request=None
+):
+    status_code: int = response["statusCode"]
+    message: str = response["message"]
+    policy_id: int = response["policyID"]
+    now: datetime = event_datetime
+    correlation_id = data["correlation_id"]
+    # start_datetime = datetime.fromisoformat(request['start_datetime'])
+    # end_datetime = datetime.fromisoformat(request['end_datetime'])
+    # start_datetime = request['start_datetime']
+    # end_datetime = request['end_datetime']
+
+    if status_code == HTTP_SUCCESS:
+        # Policy id may not have been returned in a non-success scenario.
+
+        # Update tracker.
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.POLICY_CREATED,
+            event_datetime=now,
+            message=message,
+            policy_name=policy_name,
+            policy_id=policy_id,
+            # request_start_date=start_datetime,
+            # request_end_date=end_datetime
+        )
+    else:
+        # Update tracker.
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.DECLINED,
+            event_datetime=now,
+            message=message,
+            policy_name=policy_name,
+            # request_start_date=start_datetime,
+            # request_end_date=end_datetime
+        )
+
+        # Create event.
+        # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED,
+        #                                       now, message)
+        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
+def extend_policy_update_tracker(
+    data=None, event_datetime=None, response=None, policy_name=None, request=None
+):
+    status_code: int = response["statusCode"]
+    message: str = response["message"]
+    policy_id: int = response["policyID"]
+    now: datetime = event_datetime
+    correlation_id = data["correlation_id"]
+    start_datetime = datetime.fromisoformat(request["start_datetime"])
+    end_datetime = datetime.fromisoformat(request["end_datetime"])
+    # new_start = request['start_datetime']
+    # new_end = request['end_datetime']
+    if status_code == HTTP_SUCCESS:
+        # Update tracker with the following details:
+        #
+        # request 1: EXTENDED_BY 2 (also send to Kinesis)
+        # request 2: EXTENDS 1 (also send to Kinesis)
+        # request 2: Existing (previous) policy has been successfully extended in PolicyNet.
+        #
+        # 1. Update the contiguous request to indicate it has been extended.
+        contiguous_correlation_id: str = data["crrltnId"]
+        extend_message: str = f"Request {contiguous_correlation_id} has been extended by request {correlation_id}"
+
+        update_tracker(
+            correlation_id=contiguous_correlation_id,
+            stage=Stage.EXTENDED_BY,
+            event_datetime=now,
+            message=extend_message,
+            # request_start_date=request['rqstStrtDt'],
+            # request_end_date=new_start,
+            extended_by=data["correlation_id"],
+        )
+
+        # Send to Kinesis.
+        # payload: dict = assemble_event_payload(contiguous_correlation_id, Stage.EXTENDED_BY, now, extend_message)
+        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+        # 2. Update the new request to indicate that it is extending a previous request.
+        extend_message = (
+            f"Request {correlation_id} extends request {contiguous_correlation_id}"
+        )
+
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.EXTENDS,
+            event_datetime=now,
+            message=extend_message,
+            request_start_date=new_start,
+            request_end_date=new_end,
+            extends=contiguous_correlation_id,
+        )
+
+        # Send to Kinesis.
+        # payload: dict = assemble_event_payload(correlation_id, Stage.EXTENDS, now, extend_message)
+        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+        # 3. Update the new request to say the extension has been successfully applied to PolicyNet.
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.POLICY_EXTENDED,
+            event_datetime=now,
+            message=message,
+            policy_name=policy_name,
+            policy_id=policy_id,
+        )
+    else:
+        # Update tracker.
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.DECLINED,
+            event_datetime=now,
+            message=message,
+            policy_name=policy_name,
+        )
+
+        # Send to Kinesis.
+        # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
+        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
+def create_policy(request: dict) -> dict:
     """
     Create policy in PolicyNet.
 
@@ -135,43 +265,56 @@ def create_policy(correlation_id: str, request: dict) -> dict:
     status_code: int = response["statusCode"]
     message: str = response["message"]
 
-    if status_code == HTTP_SUCCESS:
-        # Policy id may not have been returned in a non-success scenario.
-        policy_id: int = response["policyID"]
+    if "site_switch_crl_id" not in request:
+        request["site_switch_crl_id"] = [{"correlation_id": request["correlation_id"]}]
 
-        # Update tracker.
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.POLICY_CREATED,
-            event_datetime=now,
-            message=message,
-            policy_name=policy_name,
-            policy_id=policy_id,
-            request_start_date=start_datetime,
-            request_end_date=end_datetime,
-        )
-    else:
-        # Update tracker.
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.DECLINED,
-            event_datetime=now,
-            message=message,
-            policy_name=policy_name,
-            request_start_date=start_datetime,
-            request_end_date=end_datetime,
-        )
+    partial_create_policy_update_tracker = partial(
+        create_policy_update_tracker,
+        event_datetime=now,
+        response=response,
+        policy_name=policy_name,
+        request=request,
+    )
 
-        # Create event.
-        # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
-        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    list(map(partial_create_policy_update_tracker, request["site_switch_crl_id"]))
+    logger.info("Create policy response")
+    logger.info(response)
+
+    # if status_code == HTTP_SUCCESS:
+    #     # Policy id may not have been returned in a non-success scenario.
+    #     policy_id: int = response["policyID"]
+
+    #     # Update tracker.
+    #     update_tracker(
+    #         correlation_id=correlation_id,
+    #         stage=Stage.POLICY_CREATED,
+    #         event_datetime=now,
+    #         message=message,
+    #         policy_name=policy_name,
+    #         policy_id=policy_id,
+    #         request_start_date=start_datetime,
+    #         request_end_date=end_datetime,
+    #     )
+    # else:
+    #     # Update tracker.
+    #     update_tracker(
+    #         correlation_id=correlation_id,
+    #         stage=Stage.DECLINED,
+    #         event_datetime=now,
+    #         message=message,
+    #         policy_name=policy_name,
+    #         request_start_date=start_datetime,
+    #         request_end_date=end_datetime,
+    #     )
+
+    #     # Create event.
+    #     # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
+    #     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
     return response
 
 
-def extend_policy(
-    correlation_id: str, request: dict, contiguous_request: dict, terminal_request: dict
-) -> dict:
+def extend_policy(request: dict) -> dict:
     """
     Extend policy in PolicyNet.
 
@@ -226,72 +369,88 @@ def extend_policy(
     message: str = response["message"]
     policy_id: int = response["policyID"]
 
-    if status_code == HTTP_SUCCESS:
-        # Update tracker with the following details:
-        #
-        # request 1: EXTENDED_BY 2 (also send to Kinesis)
-        # request 2: EXTENDS 1 (also send to Kinesis)
-        # request 2: Existing (previous) policy has been successfully extended in PolicyNet.
-        #
-        # 1. Update the contiguous request to indicate it has been extended.
-        contiguous_correlation_id: str = contiguous_request["crrltnId"]
-        extend_message: str = f"Request {contiguous_correlation_id} has been extended by request {correlation_id}"
+    if "site_switch_crl_id" not in request:
+        request["site_switch_crl_id"] = [
+            {
+                "correlation_id": request["correlation_id"],
+                "crrltnId": request["crrltnId"],
+            }
+        ]
+    partial_extend_policy_update_tracker = partial(
+        extend_policy_update_tracker,
+        event_datetime=now,
+        response=response,
+        policy_name=policy_name,
+        request=request,
+    )
+    list(map(partial_extend_policy_update_tracker, request["site_switch_crl_id"]))
 
-        update_tracker(
-            correlation_id=contiguous_correlation_id,
-            stage=Stage.EXTENDED_BY,
-            event_datetime=now,
-            message=extend_message,
-            request_start_date=contiguous_start,
-            request_end_date=contiguous_end,
-            extended_by=correlation_id,
-        )
+    # if status_code == HTTP_SUCCESS:
+    #     # Update tracker with the following details:
+    #     #
+    #     # request 1: EXTENDED_BY 2 (also send to Kinesis)
+    #     # request 2: EXTENDS 1 (also send to Kinesis)
+    #     # request 2: Existing (previous) policy has been successfully extended in PolicyNet.
+    #     #
+    #     # 1. Update the contiguous request to indicate it has been extended.
+    #     contiguous_correlation_id: str = contiguous_request["crrltnId"]
+    #     extend_message: str = f"Request {contiguous_correlation_id} has been extended by request {correlation_id}"
 
-        # Send to Kinesis.
-        # payload: dict = assemble_event_payload(contiguous_correlation_id, Stage.EXTENDED_BY, now, extend_message)
-        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    #     update_tracker(
+    #         correlation_id=contiguous_correlation_id,
+    #         stage=Stage.EXTENDED_BY,
+    #         event_datetime=now,
+    #         message=extend_message,
+    #         request_start_date=contiguous_start,
+    #         request_end_date=contiguous_end,
+    #         extended_by=correlation_id,
+    #     )
 
-        # 2. Update the new request to indicate that it is extending a previous request.
-        extend_message = (
-            f"Request {correlation_id} extends request {contiguous_correlation_id}"
-        )
+    #     # Send to Kinesis.
+    #     # payload: dict = assemble_event_payload(contiguous_correlation_id, Stage.EXTENDED_BY, now, extend_message)
+    #     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.EXTENDS,
-            event_datetime=now,
-            message=extend_message,
-            request_start_date=new_start,
-            request_end_date=new_end,
-            extends=contiguous_correlation_id,
-        )
+    #     # 2. Update the new request to indicate that it is extending a previous request.
+    #     extend_message = (
+    #         f"Request {correlation_id} extends request {contiguous_correlation_id}"
+    #     )
 
-        # Send to Kinesis.
-        # payload: dict = assemble_event_payload(correlation_id, Stage.EXTENDS, now, extend_message)
-        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    #     update_tracker(
+    #         correlation_id=correlation_id,
+    #         stage=Stage.EXTENDS,
+    #         event_datetime=now,
+    #         message=extend_message,
+    #         request_start_date=new_start,
+    #         request_end_date=new_end,
+    #         extends=contiguous_correlation_id,
+    #     )
 
-        # 3. Update the new request to say the extension has been successfully applied to PolicyNet.
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.POLICY_EXTENDED,
-            event_datetime=now,
-            message=message,
-            policy_name=policy_name,
-            policy_id=policy_id,
-        )
-    else:
-        # Update tracker.
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.DECLINED,
-            event_datetime=now,
-            message=message,
-            policy_name=policy_name,
-        )
+    #     # Send to Kinesis.
+    #     # payload: dict = assemble_event_payload(correlation_id, Stage.EXTENDS, now, extend_message)
+    #     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
-        # Send to Kinesis.
-        # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
-        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    #     # 3. Update the new request to say the extension has been successfully applied to PolicyNet.
+    #     update_tracker(
+    #         correlation_id=correlation_id,
+    #         stage=Stage.POLICY_EXTENDED,
+    #         event_datetime=now,
+    #         message=message,
+    #         policy_name=policy_name,
+    #         policy_id=policy_id,
+    #     )
+    # else:
+    #     # Update tracker.
+    #     update_tracker(
+    #         correlation_id=correlation_id,
+    #         stage=Stage.DECLINED,
+    #         event_datetime=now,
+    #         message=message,
+    #         policy_name=policy_name,
+    #     )
+
+    #     # Send to Kinesis.
+    #     # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
+    #     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
     return response
 
@@ -325,84 +484,93 @@ def handle_create_policy(request: dict) -> dict:
     :param request:
     :return:
     """
-    logger.debug("handle_create_policy:\n%s", request)
-
     correlation_id: str = request["correlation_id"]
     errors: list = RequestValidator.validate_dlc_override_request(
-        request, DEFAULT_OVERRIDE_DURATION_MINUTES
+        request, DEFAULT_OVERRIDE_DURATION_MINUTES, check=False
     )
+    responses = []
 
     if errors:
-        response: dict = report_errors(correlation_id, errors)
+        if isinstance(correlation_id, list):
+            partial_report_errors = partial(report_errors, errors=errors)
+            list(map(partial_report_errors, correlation_id))
+        else:
+            report_errors(correlation_id, errors)
+
+        return {
+            "statusCode": HTTP_BAD_REQUEST,
+            "message": "Invalid request",
+            "errorDetails": [e.error for e in errors],
+        }
     else:
         # Get request(s) that are previously contiguous to this one.
-        contiguous_request, terminal_request = get_contiguous_request(request)
+        contiguous_requests = new_get_contiguous_request(request)
 
         now: datetime = datetime.now(timezone.utc)
         deploy_start_datetime: str = now.strftime(POLICY_DEPLOY_DATETIME_FORMAT)
-        logger.debug(
-            "Default policy deployment start datetime: %s", deploy_start_datetime
-        )
+        # logger.debug("Default policy deployment start datetime: %s", deploy_start_datetime)
 
         # Contiguous with the same switch direction
-        if (
-            contiguous_request
-            and request["status"] == contiguous_request["overrdValue"]
-        ):
-            logger.debug("Contiguous request: %s", contiguous_request)
-            logger.debug("Terminal request: %s", terminal_request)
+        for contiguous_request in contiguous_requests:
+            # Contiguous with the same switch direction
+            if request["status"] == contiguous_request["overrdValue"]:
+                logger.debug("Contiguous request: %s", contiguous_request)
+                # logger.debug("Terminal request: %s", terminal_request)
 
-            # Extend policy in PolicyNet.
-            response: dict = extend_policy(
-                correlation_id, request, contiguous_request, terminal_request
-            )
+                # Extend policy in PolicyNet.
+                response: dict = extend_policy(contiguous_request)
 
-            if response["statusCode"] == HTTP_SUCCESS:
-                # Check to see when we can deploy this policy - if the contiguous policy is currently
-                # being enforced ("now" between start and end date), we can deploy immediately.
-                start: datetime = datetime.fromisoformat(
-                    contiguous_request["rqstStrtDt"]
+                if response["statusCode"] == HTTP_SUCCESS:
+                    # Check to see when we can deploy this policy - if the contiguous policy is currently
+                    # being enforced ("now" between start and end date), we can deploy immediately.
+                    start: datetime = datetime.fromisoformat(
+                        contiguous_request["rqstStrtDt"]
+                    )
+                    end: datetime = datetime.fromisoformat(
+                        contiguous_request["rqstEndDt"]
+                    )
+
+                    if not is_being_enforced(start, end, now):
+                        # Policy currently NOT being enforced.
+                        # We need to pause deployment until after the contiguous policy is being enforced.
+                        deploy_start: datetime = start + timedelta(
+                            minutes=CONTIGUOUS_START_BUFFER_MINUTES
+                        )
+                        deploy_start_datetime: str = deploy_start.strftime(
+                            POLICY_DEPLOY_DATETIME_FORMAT
+                        )
+                        logger.info(
+                            "Setting policy deployment start datetime to %s",
+                            deploy_start_datetime,
+                        )
+
+            # Contiguous with the opposite switch direction
+            else:
+                # When there is a contiguous request of the opposite switch direction we need to push back the start
+                # datetime so the contiguous request has time to finish as it doesn't finish exactly at the end time in
+                # PolicyNet.
+                start_datetime: datetime = datetime.fromisoformat(
+                    request["start_datetime"]
                 )
-                end: datetime = datetime.fromisoformat(contiguous_request["rqstEndDt"])
+                start_datetime += timedelta(minutes=OPPOSITE_SWITCH_DIRECTION_BACKOFF)
+                start_datetime_str: str = start_datetime.isoformat()
 
-                if not is_being_enforced(start, end, now):
-                    # Policy currently NOT being enforced.
-                    # We need to pause deployment until after the contiguous policy is being enforced.
-                    deploy_start: datetime = start + timedelta(
-                        minutes=CONTIGUOUS_START_BUFFER_MINUTES
-                    )
-                    deploy_start_datetime: str = deploy_start.strftime(
-                        POLICY_DEPLOY_DATETIME_FORMAT
-                    )
-                    logger.info(
-                        "Setting policy deployment start datetime to %s",
-                        deploy_start_datetime,
-                    )
-
-        # Contiguous with the opposite switch direction
-        elif (
-            contiguous_request
-            and request["status"] != contiguous_request["overrdValue"]
-        ):
-            # When there is a contiguous request of the opposite switch direction we need to push back the start
-            # datetime so the contiguous request has time to finish as it doesn't finish exactly at the end time in
-            # PolicyNet.
-            start_datetime: datetime = datetime.fromisoformat(request["start_datetime"])
-            start_datetime += timedelta(minutes=OPPOSITE_SWITCH_DIRECTION_BACKOFF)
-            start_datetime_str: str = start_datetime.isoformat()
-
-            request["start_datetime"] = start_datetime_str
-            request["replace"] = True
-            response: dict = create_policy(correlation_id, request)
-        else:
-            # No contiguous request - create a new stand-alone policy and deploy straight away.
+                request["start_datetime"] = start_datetime_str
+                request["replace"] = True
+                response: dict = create_policy(request)
+            response["deploy_start_datetime"] = deploy_start_datetime
+            response["request"] = contiguous_request
+            responses.append(response)
+        # else:
+        #     # No contiguous request - create a new stand-alone policy and deploy straight away.
+        if request["switch_addresses"]:
             request["replace"] = False
-            response: dict = create_policy(correlation_id, request)
-
+            response: dict = create_policy(request)
+            response["deploy_start_datetime"] = deploy_start_datetime
+            response["request"] = request
+            responses.append(response)
         # Add the policy deployment start datetime.
-        response["deploy_start_datetime"] = deploy_start_datetime
-
-    return response
+        return responses
 
 
 def handle_deploy_policy(event: dict):
@@ -415,19 +583,22 @@ def handle_deploy_policy(event: dict):
     logger.debug("handle_deploy_policy: %s", event)
     logger.info("Deploying policy in PolicyNet")
 
-    correlation_id: str = event["request"]["correlation_id"]
+    correlation_ids = event["request"]["correlation_id"]
+    if not isinstance(correlation_ids, list):
+        correlation_ids = [correlation_ids]
 
     if "policyID" not in event:
         now: datetime = datetime.now(timezone.utc)
         message: str = "Invalid request: policy deployment needs policy id"
 
         # Update tracker.
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.DECLINED,
-            event_datetime=now,
-            message=message,
-        )
+        for correlation_id in correlation_ids:
+            update_tracker(
+                correlation_id=correlation_id,
+                stage=Stage.DECLINED,
+                event_datetime=now,
+                message=message,
+            )
 
         # Create event.
         # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
@@ -446,23 +617,24 @@ def handle_deploy_policy(event: dict):
     status_code: int = response["statusCode"]
     message: str = response["message"]
 
-    if status_code == HTTP_SUCCESS:
-        # Update tracker.
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.POLICY_DEPLOYED,
-            event_datetime=now,
-            message=message,
-            policy_id=policy_id,
-        )
-    else:
-        # Update tracker.
-        update_tracker(
-            correlation_id=correlation_id,
-            stage=Stage.DECLINED,
-            event_datetime=now,
-            message=message,
-        )
+    for correlation_id in correlation_ids:
+        if status_code == HTTP_SUCCESS:
+            # Update tracker.
+            update_tracker(
+                correlation_id=correlation_id,
+                stage=Stage.POLICY_DEPLOYED,
+                event_datetime=now,
+                message=message,
+                policy_id=policy_id,
+            )
+        else:
+            # Update tracker.
+            update_tracker(
+                correlation_id=correlation_id,
+                stage=Stage.DECLINED,
+                event_datetime=now,
+                message=message,
+            )
 
         # Create event.
         # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
