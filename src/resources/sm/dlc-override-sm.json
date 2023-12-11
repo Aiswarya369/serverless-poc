@@ -44,7 +44,8 @@
               "Type": "Map",
               "ItemProcessor": {
                 "ProcessorConfig": {
-                  "Mode": "INLINE"
+                  "Mode": "DISTRIBUTED",
+                  "ExecutionType": "EXPRESS"
                 },
                 "StartAt": "If Policy Creation Succeeded",
                 "States": {
@@ -62,8 +63,8 @@
                     "Default": "Policy Deployment Wait"
                   },
                   "Internal Fail": {
-                    "Type": "Fail",
-                    "Cause": "Step Create LC Override Policy or Deploy LC Override Policy has returned a non 200 code."
+                    "Type": "Pass",
+                    "End": true
                   },
                   "Policy Deployment Wait": {
                     "Type": "Wait",
@@ -84,7 +85,7 @@
                     "Resource": "arn:aws:states:::lambda:invoke",
                     "Parameters": {
                       "Payload.$": "$",
-                      "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
+                      "FunctionName": "arn:aws:lambda:us-east-1:109533178637:function:dlc_override_statemachine_fn:$LATEST"
                     },
                     "Retry": [
                       {
@@ -117,7 +118,6 @@
                     ],
                     "Default": "Internal Success"
                   },
-                
                   "Internal Success": {
                     "Type": "Pass",
                     "End": true
@@ -125,7 +125,9 @@
                 }
               },
               "End": true,
-              "InputPath": "$.Payload"
+              "InputPath": "$.Payload",
+              "Label": "Map",
+              "MaxConcurrency": 100
             }
           }
         }
