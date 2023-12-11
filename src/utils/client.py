@@ -11,6 +11,7 @@ from distutils.util import strtobool
 from logging import Logger
 from typing import List, Union, Tuple, Optional, Dict, Any
 import uuid
+import random
 import urllib3
 from botocore.client import BaseClient
 
@@ -169,7 +170,7 @@ def create_lc_override_schedule_policy(
         # lc_response = self._service.createLoadControlSchedule(**req_data)
         # logger.info("lc_response %s", lc_response)
 
-        policy_id = str(uuid.uuid4())
+        policy_id = random.randint(1000,9999)
 
         override_schedule_reply: dict = {
             "message": "Direct load control override policy created successfully",

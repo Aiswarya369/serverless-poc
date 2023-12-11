@@ -54,6 +54,7 @@ def create_tracker(
     request_start_date: datetime = None,
     request_end_date: datetime = None,
     override: str = None,
+    original_start_datetime: str = None,
 ):
     """
     Create tracker records.
@@ -73,7 +74,6 @@ def create_tracker(
         sub_id,
         request_site,
     )
-
     now: datetime = datetime.now(timezone.utc)
 
     header_item: dict = {
@@ -101,6 +101,8 @@ def create_tracker(
     if request_start_date:
         start: str = request_start_date.isoformat(timespec="seconds")
         header_item["rqstStrtDt"] = start
+    if original_start_datetime:
+        header_item["original_start_datetime"] = original_start_datetime
 
     if request_end_date:
         header_item["rqstEndDt"] = request_end_date.isoformat(timespec="seconds")
@@ -610,11 +612,16 @@ def group_contiguous_requests(existing_data, req_data):
     Finally, merge the both records and return.
     """
     df = pd.DataFrame(existing_data)
-    site_switch_crl_ids_df = pd.DataFrame(req_data["site_switch_crl_ids"])
+    if "site" in df:
+        del df["site"]
 
-    df = df.join(
-        site_switch_crl_ids_df.set_index("switch_address"), on="switch_address"
-    )
+    req_data_df = pd.DataFrame(req_data["site_switch_crl_id"])
+    req_data_df["group_id"] = req_data["group_id"]
+    req_data_df["status"] = req_data["status"]
+    req_data_df["start_datetime"] = req_data["start_datetime"]
+    req_data_df["end_datetime"] = req_data["end_datetime"]
+
+    df = df.join(req_data_df.set_index("switch_addresses"), on="mtrSrlNo")
     # df['start_datetime'] = pd.to_datetime(df['start_datetime'])
     # df = df.loc[df.groupby('site')['start_datetime'].idxmax()]
     # df['start_datetime'] = str(pd.to_datetime(df['start_datetime']))
@@ -623,33 +630,24 @@ def group_contiguous_requests(existing_data, req_data):
         df.groupby(
             [
                 "group_id",
-                "State",
+                "status",
                 "start_datetime",
                 "end_datetime",
                 "overrdValue",
                 "original_start_datetime",
                 "rqstStrtDt",
+                "rqstEndDt",
             ]
         )
-        .agg(
-            {
-                "switch_address": list,
-                "site": list,
-                "correlation_id": list,
-                "crrltnId": list,
-            }
-        )
+        .agg({"mtrSrlNo": list, "site": list, "correlation_id": list, "crrltnId": list})
         .reset_index()
     )
 
     grouped_df["site_switch_crl_id"] = grouped_df.apply(
         lambda row: [
-            {"site": s, "switch_address": sa, "correlation_id": c, "crrltnId": cl}
-            for s, sa, c, cl, rs in zip(
-                row["site"],
-                row["switch_address"],
-                row["correlation_id"],
-                row["crrltnId"],
+            {"site": s, "switch_addresses": sa, "correlation_id": c, "crrltnId": cl}
+            for s, sa, c, cl in zip(
+                row["site"], row["mtrSrlNo"], row["correlation_id"], row["crrltnId"]
             )
         ],
         axis=1,
@@ -686,8 +684,12 @@ def new_get_contiguous_request(request: dict):
     switch_addresses = request["switch_addresses"]
     # meter_serial_number: str = switch_addresses[0] if type(switch_addresses) == list else switch_addresses
 
-    # logger.info("Looking for contiguous LC requests: %s / %s / %s",
-    #             site, switch_addresses, start_datetime)
+    logger.info(
+        "Looking for contiguous LC requests: %s / %s / %s",
+        site,
+        switch_addresses,
+        start_datetime,
+    )
 
     items: list = []
     last_evaluated_key: Optional[dict] = None
@@ -752,7 +754,8 @@ def new_get_contiguous_request(request: dict):
             # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
         else:
             break
-    contiguous_sw_addresses = list(map(lambda x: x["switch_addresses"], items))
+
+    contiguous_sw_addresses = list(map(lambda x: x["mtrSrlNo"], items))
     # contiguous_requests = {}
     # def create_contiguous_requests(item):
     #     original_start_datetime = item[0][0]
@@ -771,7 +774,7 @@ def new_get_contiguous_request(request: dict):
     #             }
     # grouped_stream_item = stream_item.groupBy(lambda x: (x['original_start_datetime'], x['overrdValue'])).map(create_contiguous_requests)
     if not items:
-        # logger.info("No contiguous requests found")
+        logger.info("No contiguous requests found")
         return []
     if "site_switch_crl_id" not in request:
         contiguous_request = items[0]

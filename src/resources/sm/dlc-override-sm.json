@@ -7,15 +7,7 @@
       "Branches": [
         {
           "StartAt": "Log Request",
-          "States": {
-            "Internal Fail": {
-              "Type": "Fail",
-              "Cause": "Step Create LC Override Policy or Deploy LC Override Policy has returned a non 200 code."
-            },
-            "Internal Success": {
-              "Type": "Pass",
-              "End": true
-            },
+          "States": {     
             "Log Request": {
               "Type": "Pass",
               "Next": "Create LC Override Policy",
@@ -43,76 +35,97 @@
                   "BackoffRate": 2
                 }
               ],
-              "Next": "If Policy Creation Succeeded",
-              "ResultPath": "$.createDLCPolicyTaskResult",
+              "Next": "Map",
               "ResultSelector": {
                 "Payload.$": "$.Payload"
               }
             },
-            "If Policy Creation Succeeded": {
-              "Type": "Choice",
-              "Choices": [
-                {
-                  "Not": {
-                    "Variable": "$.createDLCPolicyTaskResult.Payload.statusCode",
-                    "NumericEquals": 200
+            "Map": {
+              "Type": "Map",
+              "ItemProcessor": {
+                "ProcessorConfig": {
+                  "Mode": "INLINE"
+                },
+                "StartAt": "If Policy Creation Succeeded",
+                "States": {
+                  "If Policy Creation Succeeded": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Not": {
+                          "Variable": "$.statusCode",
+                          "NumericEquals": 200
+                        },
+                        "Next": "Internal Fail"
+                      }
+                    ],
+                    "Default": "Policy Deployment Wait"
                   },
-                  "Next": "Internal Fail"
-                }
-              ],
-              "Default": "Policy Deployment Wait"
-            },
-            "Policy Deployment Wait": {
-              "Type": "Wait",
-              "Next": "Prepare Deploy Policy Request",
-              "TimestampPath": "$.createDLCPolicyTaskResult.Payload.deploy_start_datetime"
-            },
-            "Prepare Deploy Policy Request": {
-              "Type": "Pass",
-              "Next": "Deploy LC Override Policy",
-              "Parameters": {
-                "action": "deployDLCPolicy",
-                "request.$": "$.request",
-                "policyID.$": "$.createDLCPolicyTaskResult.Payload.policyID"
-              }
-            },
-            "Deploy LC Override Policy": {
-              "Type": "Task",
-              "Resource": "arn:aws:states:::lambda:invoke",
-              "Parameters": {
-                "Payload.$": "$",
-                "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
-              },
-              "Retry": [
-                {
-                  "ErrorEquals": [
-                    "Lambda.ServiceException",
-                    "Lambda.AWSLambdaException",
-                    "Lambda.SdkClientException"
-                  ],
-                  "IntervalSeconds": 2,
-                  "MaxAttempts": 6,
-                  "BackoffRate": 2
-                }
-              ],
-              "Next": "If Policy Deployment Succeeded",
-              "ResultSelector": {
-                "Payload.$": "$.Payload"
-              },
-              "ResultPath": "$.deployDLCPolicyTaskResult"
-            },
-            "If Policy Deployment Succeeded": {
-              "Type": "Choice",
-              "Choices": [
-                {
-                  "Not": {
-                    "Variable": "$.deployDLCPolicyTaskResult.Payload.statusCode",
-                    "NumericEquals": 200
+                  "Internal Fail": {
+                    "Type": "Fail",
+                    "Cause": "Step Create LC Override Policy or Deploy LC Override Policy has returned a non 200 code."
                   },
-                  "Next": "Internal Fail"
+                  "Policy Deployment Wait": {
+                    "Type": "Wait",
+                    "TimestampPath": "$.deploy_start_datetime",
+                    "Next": "Prepare Deploy Policy Request"
+                  },
+                  "Prepare Deploy Policy Request": {
+                    "Type": "Pass",
+                    "Parameters": {
+                      "action": "deployDLCPolicy",
+                      "request.$": "$.request",
+                      "policyID.$": "$.policyID"
+                    },
+                    "Next": "Deploy LC Override Policy"
+                  },
+                  "Deploy LC Override Policy": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "Payload.$": "$",
+                      "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "Lambda.ServiceException",
+                          "Lambda.AWSLambdaException",
+                          "Lambda.SdkClientException"
+                        ],
+                        "IntervalSeconds": 2,
+                        "MaxAttempts": 6,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "ResultSelector": {
+                      "Payload.$": "$.Payload"
+                    },
+                    "ResultPath": "$.deployDLCPolicyTaskResult",
+                    "Next": "If Policy Deployment Succeeded"
+                  },
+                  "If Policy Deployment Succeeded": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Not": {
+                          "Variable": "$.deployDLCPolicyTaskResult.Payload.statusCode",
+                          "NumericEquals": 200
+                        },
+                        "Next": "Internal Fail"
+                      }
+                    ],
+                    "Default": "Internal Success"
+                  },
+                
+                  "Internal Success": {
+                    "Type": "Pass",
+                    "End": true
+                  }
                 }
-              ],
-              "Default": "Internal Success"
+              },
+              "End": true,
+              "InputPath": "$.Payload"
             }
           }
         }

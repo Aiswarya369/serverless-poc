@@ -196,8 +196,9 @@ def extend_policy_update_tracker(
             stage=Stage.EXTENDS,
             event_datetime=now,
             message=extend_message,
-            request_start_date=new_start,
-            request_end_date=new_end,
+            original_start_datetime=request["original_start_datetime"],
+            request_start_date=start_datetime,
+            request_end_date=end_datetime,
             extends=contiguous_correlation_id,
         )
 
@@ -229,7 +230,7 @@ def extend_policy_update_tracker(
         # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
-def create_policy(request: dict) -> dict:
+def create_policy(request: dict):
     """
     Create policy in PolicyNet.
 
@@ -267,7 +268,6 @@ def create_policy(request: dict) -> dict:
 
     if "site_switch_crl_id" not in request:
         request["site_switch_crl_id"] = [{"correlation_id": request["correlation_id"]}]
-
     partial_create_policy_update_tracker = partial(
         create_policy_update_tracker,
         event_datetime=now,
@@ -275,7 +275,6 @@ def create_policy(request: dict) -> dict:
         policy_name=policy_name,
         request=request,
     )
-
     list(map(partial_create_policy_update_tracker, request["site_switch_crl_id"]))
     logger.info("Create policy response")
     logger.info(response)
@@ -314,7 +313,7 @@ def create_policy(request: dict) -> dict:
     return response
 
 
-def extend_policy(request: dict) -> dict:
+def extend_policy(request):
     """
     Extend policy in PolicyNet.
 
@@ -326,8 +325,8 @@ def extend_policy(request: dict) -> dict:
     """
     logger.info("Extending existing policy in PolicyNet")
 
-    terminal_start: datetime = datetime.fromisoformat(terminal_request["rqstStrtDt"])
-    terminal_end: datetime = datetime.fromisoformat(terminal_request["rqstEndDt"])
+    terminal_start: datetime = datetime.fromisoformat(request["rqstStrtDt"])
+    terminal_end: datetime = datetime.fromisoformat(request["original_start_datetime"])
     contiguous_start: datetime = datetime.fromisoformat(
         contiguous_request["rqstStrtDt"]
     )
@@ -358,13 +357,12 @@ def extend_policy(request: dict) -> dict:
     # with event datetimes.
     now: datetime = datetime.now(timezone.utc)
 
-    policy_name, response = replace_lc_override_schedule_policy(
+    policy_name, response = policynet_client.replace_lc_override_schedule_policy(
         meter_serials=request["switch_addresses"],
         start_datetime=terminal_start,
         turn_off=turn_off,
         duration=duration,
     )
-
     status_code: int = response["statusCode"]
     message: str = response["message"]
     policy_id: int = response["policyID"]
@@ -467,7 +465,7 @@ def is_being_enforced(start: datetime, end: datetime, now: datetime):
     return True if start <= now < end else False
 
 
-def handle_create_policy(request: dict) -> dict:
+def handle_create_policy(request: dict):
     """
     PolicyNet policy creation.
 
@@ -484,6 +482,8 @@ def handle_create_policy(request: dict) -> dict:
     :param request:
     :return:
     """
+    logger.info("handle_create_policy:\n%s", request)
+
     correlation_id: str = request["correlation_id"]
     errors: list = RequestValidator.validate_dlc_override_request(
         request, DEFAULT_OVERRIDE_DURATION_MINUTES, check=False
@@ -582,7 +582,6 @@ def handle_deploy_policy(event: dict):
     """
     logger.debug("handle_deploy_policy: %s", event)
     logger.info("Deploying policy in PolicyNet")
-
     correlation_ids = event["request"]["correlation_id"]
     if not isinstance(correlation_ids, list):
         correlation_ids = [correlation_ids]
@@ -609,6 +608,7 @@ def handle_deploy_policy(event: dict):
     # Deploy policy.
     # The response from PolicyNet doesn't include anything useful, so we'll have to be "as near as"
     # with event datetimes.
+
     now: datetime = datetime.now(timezone.utc)
     policy_id: int = event["policyID"]
 
@@ -653,7 +653,7 @@ def lambda_handler(event: dict, _):
     :param _: Lambda context (not used)
     :return:
     """
-    global PolicyNetClient
+    global policynet_client
 
     logger.info("----------------")
     logger.info("Direct Load Control State Machine override running...")
@@ -674,20 +674,21 @@ def lambda_handler(event: dict, _):
     # Get PolicyNet credentials; set in our PolicyNet client object.
     # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(AppConfig.PNET_AUTH_DETAILS_SECRET_ID)
 
-    # if not PolicyNetClient:
+    # if not policynet_client:
     #     url = pnet_auth_details['pnet_url']
-    #     PolicyNetClient = PolicyNetClient(f"{url}/PolicyNet.wsdl", url, DYNAMO_RESOURCE,
-    #                                        session_table=PNET_SESSION_TABLE,
-    #                                        session_lifetime=PNET_SESSION_LIFETIME_SECONDS)
-    #     PolicyNetClient.set_credentials(pnet_auth_details['pnet_username'], pnet_auth_details['pnet_password'])
+    #     policynet_client = PolicyNetClient(f"{url}/PolicyNet.wsdl", url, DYNAMO_RESOURCE,
+    #                                       session_table=PNET_SESSION_TABLE,
+    #                                       session_lifetime=PNET_SESSION_LIFETIME_SECONDS)
+    #     policynet_client.set_credentials(pnet_auth_details['pnet_username'], pnet_auth_details['pnet_password'])
     #     logger.debug("Set credentials in PolicyNet client")
 
     if action == SupportedOverrideSMActions.CREATE_DLC_POLICY.value:
         response = handle_create_policy(request)
+        return response if type(response) == list else [response]
     elif action == SupportedOverrideSMActions.DEPLOY_DLC_POLICY.value:
         response = handle_deploy_policy(event)
         # elif action == SupportedOverrideSMActions.LOGOUT_PNET.value:
-        # PolicyNetClient.logout()
+        #     policynet_client.logout()
 
         response: dict = {
             "statusCode": HTTP_SUCCESS,

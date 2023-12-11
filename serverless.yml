@@ -39,7 +39,7 @@ provider:
   runtime: python3.9
   region: ap-south-1
   layers:
-    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:20
+    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:27
     - arn:aws:lambda:ap-south-1:336392948345:layer:AWSSDKPandas-Python39:12
   tracing:
     lambda: ${self:custom.XRAY_TRACING_ENABLED}

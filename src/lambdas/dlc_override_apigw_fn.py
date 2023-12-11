@@ -1,5 +1,6 @@
 import datetime
 import json
+
 import logging
 import os
 import uuid
@@ -7,13 +8,14 @@ import boto3
 from http import HTTPStatus
 from datetime import timedelta, datetime, timezone
 from decimal import Decimal
+
 from logging import Logger
 from typing import Union, Dict, Any, List
 from aws_lambda_powertools import Tracer
 from botocore.client import BaseClient
 from src.model.enums import Stage
 
-# from cresconet_aws.support import send_message_to_support, SupportMessage, alert_on_exception
+# from cresconet_aws.support import alert_on_exception
 from src.utils.aws_utils import send_sqs_message
 from src.config.config import AppConfig
 from src.lambdas.dlc_event_helper import assemble_error_message, assemble_event_payload
@@ -109,6 +111,7 @@ def add_request_on_throttle_queue(
             },
         )
     except Exception as e:
+        # logger.exception("Exception while attempting to place request on throttle queue. %s", repr(e))
         logger.exception(
             "Exception while attempting to place request on throttle queue. %s", repr(e)
         )
@@ -196,6 +199,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     override_status: str = request["status"]
 
     # There should only be one meter serial supplied in "switch_addresses", as per validation.
+    # There should only be one meter serial supplied in "switch_addresses", as per validation.
     # switch_addresses: Union[str, List[str]] = request["switch_addresses"]
     # meter_serial_number: str = (
     #     switch_addresses[0] if type(switch_addresses) == list else switch_addresses
@@ -218,6 +222,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         request_site=site,
         serial_no=meter_serial_number,
         override=override_status,
+        original_start_datetime=request["start_datetime"],
     )
 
     # Validate the subscription.
@@ -243,7 +248,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         request, DEFAULT_OVERRIDE_DURATION_MINUTES
     )
     if duration_errors:
-        logger.debug("Duration errors: %s", duration_errors)
+        # logger.debug("Duration errors: %s", duration_errors)
         report_errors(correlation_id, now, duration_errors)
         error_details = {
             "correlation_id": correlation_id,

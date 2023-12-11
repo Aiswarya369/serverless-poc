@@ -115,6 +115,60 @@ def report_error_to_support(correlation_id: str, reason: str, subject_hint: str 
     # send_message_to_support(support_message, correlation_id=correlation_id)
 
 
+def reject_request(
+    correlation_id,
+    message: str,
+    request_start_date: Optional[datetime] = None,
+    request_end_date: Optional[datetime] = None,
+):
+    if correlation_id and (not isinstance(correlation_id, str)):
+        partial_report_error_to_client = partial(
+            report_error_to_client,
+            message=message,
+            request_start_date=request_start_date,
+            request_end_date=request_end_date,
+        )
+        list(map(partial_report_error_to_client, correlation_id))
+    else:
+        report_error_to_client(
+            correlation_id,
+            message=message,
+            request_start_date=request_start_date,
+            request_end_date=request_end_date,
+        )
+
+
+def report_error(correlation_id, reason, subject_hint=None):
+    if not isinstance(correlation_id, str):
+        partial_report_error_to_support = partial(
+            report_error_to_support, reason=reason, subject_hint=subject_hint
+        )
+        list(map(partial_report_error_to_support, correlation_id))
+    else:
+        report_error_to_support(
+            correlation_id=correlation_id, reason=reason, subject_hint=subject_hint
+        )
+
+
+def update_status(response, start, end, correlation_id):
+    start_date: datetime = response["startDate"]
+    logger.info(
+        "SM invoked for DLC request. ARN: %s, StartDateTime: %s",
+        response["executionArn"],
+        start_date,
+    )
+    update_tracker(
+        correlation_id=correlation_id,
+        stage=Stage.QUEUED,
+        event_datetime=start_date,
+        request_start_date=start,
+        request_end_date=end,
+    )
+    # payload = assemble_event_payload(correlation_id, Stage.QUEUED,
+    #                                  start_date)
+    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
 def update_start_end_times_on_request(
     request: Dict[str, Any]
 ) -> Tuple[datetime, datetime]:
@@ -139,19 +193,6 @@ def update_start_end_times_on_request(
     return start, end
 
 
-def update_status(response, start, end, correlation_id):
-    start_date: datetime = response["startDate"]
-    # logger.info("SM invoked for DLC request. ARN: %s, StartDateTime: %s",
-    # response["executionArn"], start_date)
-    update_tracker(
-        correlation_id=correlation_id,
-        stage=Stage.QUEUED,
-        event_datetime=start_date,
-        request_start_date=start,
-        request_end_date=end,
-    )
-
-
 def initiate_step_function(
     correlation_id: str, start: datetime, end: datetime, request: Dict[str, Any]
 ):
@@ -172,6 +213,7 @@ def initiate_step_function(
         step_function_id = correlation_id
         if not isinstance(correlation_id, str):
             step_function_id = "GRP-" + correlation_id[0]
+
         response = sm_handler.initiate(
             step_function_id, json.dumps(request, cls=JSONEncoder)
         )
@@ -188,10 +230,18 @@ def initiate_step_function(
             return
 
         error_message = f"Launching DLC request resulted in {status_code} status code"
-        # report_error_to_client(correlation_id=correlation_id, message=error_message, request_start_date=start,
-        #                        request_end_date=end)
-        # report_error_to_support(correlation_id=correlation_id, reason="DLC request failed",
-        #                         subject_hint="Failed Request")
+        reject_request(
+            correlation_id=correlation_id,
+            message=error_message,
+            request_start_date=start,
+            request_end_date=end,
+        )
+        report_error(
+            correlation_id=correlation_id,
+            reason="DLC request failed",
+            subject_hint="Failed Request",
+        )
+
     except step_function_client.exceptions.ExecutionAlreadyExists:
         logger.info(
             "SM already is already active for correlation_id: %s", correlation_id
@@ -202,31 +252,11 @@ def initiate_step_function(
             repr(e),
             exc_info=e,
         )
-        # report_error_to_client(correlation_id=correlation_id, message=str(e))
-        # report_error_to_support(correlation_id=correlation_id, reason="DLC Request failed with internal error",
-        #                         subject_hint="Internal Error")
-
-
-def reject_request(
-    correlation_id,
-    message: str,
-    request_start_date: Optional[datetime] = None,
-    request_end_date: Optional[datetime] = None,
-):
-    if correlation_id and (not isinstance(correlation_id, str)):
-        partial_report_error_to_client = partial(
-            report_error_to_client,
-            message=message,
-            request_start_date=request_start_date,
-            request_end_date=request_end_date,
-        )
-        list(map(partial_report_error_to_client, correlation_id))
-    else:
-        report_error_to_client(
-            correlation_id,
-            message=message,
-            request_start_date=request_start_date,
-            request_end_date=request_end_date,
+        reject_request(correlation_id=correlation_id, message=str(e))
+        report_error(
+            correlation_id=correlation_id,
+            reason="DLC Request failed with internal error",
+            subject_hint="Internal Error",
         )
 
 
@@ -344,16 +374,14 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
     :param event: The raw event.
     :param context: The lambda context.
     """
+
     try:
         logger.info("Events from SQS")
         logger.info(event)
         start_time = time.time()
-        # result = process_partial_response(
-        #     event=event,
-        #     record_handler=record_handler,
-        #     processor=processor,
-        #     context=context,
-        # )
+        start_time = time.time()
+        # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
+        #                                   context=context)
         result = list(map(record_handler, group_records(event)))
         end_time = time.time()
 
