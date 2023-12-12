@@ -19,7 +19,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", logging.INFO))
 
 # Environmental variables.
 REGION: str = os.environ.get("REGION", "ap-south-1")
-REQUEST_TRACKER_TABLE_NAME: str = os.environ.get("REQUEST_TRACKER_TABLE_NAME", "msi-dev-request-tracker-ddb")
+REQUEST_TRACKER_TABLE_NAME: str = os.environ.get("REQUEST_TRACKER_TABLE_NAME", "request-tracker-ddb")
 
 # Boto3 resources.
 DYNAMODB_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)

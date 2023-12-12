@@ -39,13 +39,13 @@ tests-no-zope = ["cloudpickle", "hypothesis", "mypy (>=1.1.1)", "pympler", "pyte
 
 [[package]]
 name = "aws-lambda-powertools"
-version = "2.29.0"
+version = "2.29.1"
 description = "Powertools for AWS Lambda (Python) is a developer toolkit to implement Serverless best practices and increase developer velocity."
 optional = false
 python-versions = ">=3.7.4,<4.0.0"
 files = [
-    {file = "aws_lambda_powertools-2.29.0-py3-none-any.whl", hash = "sha256:36e18ea58e9407145d945aa645856ecce13512d3c49d539fe2437998d6163536"},
-    {file = "aws_lambda_powertools-2.29.0.tar.gz", hash = "sha256:5d6f2d5c7c34dab313cdd57115da83b0093e72359c326414e51e6c9206eda0f6"},
+    {file = "aws_lambda_powertools-2.29.1-py3-none-any.whl", hash = "sha256:430cc6a2a4039e21198c0d63af794af8109533bcc9e7ae9434026eefce397b3c"},
+    {file = "aws_lambda_powertools-2.29.1.tar.gz", hash = "sha256:39af6f5a84127d2f20ddf35c130b016cc7fab60f07f887cf86dce634e8c7650a"},
 ]
 
 [package.dependencies]

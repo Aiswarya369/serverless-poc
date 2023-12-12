@@ -159,6 +159,7 @@ def update_header_record(
     request_end_date: datetime,
     extended_by: str,
     extends: str,
+    original_start_datetime=None,
 ):
     """
     Update tracker header record.
@@ -175,7 +176,7 @@ def update_header_record(
     :param extends: correlation id of the request that this request extends
     :return:
     """
-    logger.debug("Updating tracker record for correlation id %s", correlation_id)
+    # logger.debug("Updating tracker record for correlation id %s", correlation_id)
 
     pk: str = f"{PK_PREFIX}{correlation_id}"
     sk: str = f"{SK_REQUEST_PREFIX}{correlation_id}"
@@ -246,6 +247,12 @@ def update_header_record(
         update_expression += ", #extnds = :val12"
         expression_attribute_names["#extnds"] = "extnds"
         expression_attribute_values[":val12"] = extends
+    if original_start_datetime:
+        update_expression += ", #original_start_datetime = :val13"
+        expression_attribute_names[
+            "#original_start_datetime"
+        ] = "original_start_datetime"
+        expression_attribute_values[":val13"] = original_start_datetime
 
     REQUEST_TRACKER_TABLE.update_item(
         Key={"PK": pk, "SK": sk},
@@ -268,6 +275,7 @@ def update_tracker(
     request_end_date: datetime = None,
     extended_by: str = None,
     extends: str = None,
+    original_start_datetime=None,
 ):
     """
     Update tracker records.
@@ -283,7 +291,7 @@ def update_tracker(
     :param extended_by: correlation id of the request that this request is extended by
     :param extends: correlation id of the request that this request extends
     """
-    logger.debug("Update tracker: correlation id %s", correlation_id)
+    # logger.debug("Update tracker: correlation id %s", correlation_id)
 
     # Get header record.
     header_record = get_header_record(correlation_id)
@@ -312,6 +320,7 @@ def update_tracker(
         request_end_date=request_end_date,
         extended_by=extended_by,
         extends=extends,
+        original_start_datetime=original_start_datetime,
     )
 
     # Add detail record.
@@ -370,16 +379,8 @@ def add_tracker_detail(
     :param extended_by: correlation id of the request that this request is extended by
     :param extends: correlation id of the request that this request extends
     """
-    logger.debug("Adding tracker detail record for correlation id %s", correlation_id)
-    logger.debug(
-        "%s / %s / %s / %s / %s / %s",
-        sub_id,
-        request_site,
-        stg_no,
-        stage,
-        event_datetime,
-        message,
-    )
+    # logger.debug("Adding tracker detail record for correlation id %s", correlation_id)
+    # logger.debug("%s / %s / %s / %s / %s / %s", sub_id, request_site, stg_no, stage, event_datetime, message)
 
     detail_item: dict = {
         "PK": f"{PK_PREFIX}{correlation_id}",
@@ -641,18 +642,22 @@ def group_contiguous_requests(existing_data, req_data):
         )
         .agg({"mtrSrlNo": list, "site": list, "correlation_id": list, "crrltnId": list})
         .reset_index()
+        .rename(columns={"mtrSrlNo": "switch_addresses"})
     )
 
     grouped_df["site_switch_crl_id"] = grouped_df.apply(
         lambda row: [
             {"site": s, "switch_addresses": sa, "correlation_id": c, "crrltnId": cl}
             for s, sa, c, cl in zip(
-                row["site"], row["mtrSrlNo"], row["correlation_id"], row["crrltnId"]
+                row["site"],
+                row["switch_addresses"],
+                row["correlation_id"],
+                row["crrltnId"],
             )
         ],
         axis=1,
     )
-
+    logger.info("Sub grouped data : %s", grouped_df.to_dict(orient="records"))
     return grouped_df.to_dict(orient="records")
 
 

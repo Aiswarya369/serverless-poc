@@ -12,6 +12,7 @@ custom:
   SUBSCRIPTION_TABLE_ARN: "arn:aws:dynamodb:ap-south-1:752671163579:table/${self:custom.SUBSCRIPTION_TABLE_NAME}"
 
   OVERRIDE_THROTTLING_CONFIG: ${file(serverless-dev.yml):override_throttling_config}
+  OVERRIDE_SUBGRP_CONFIG: ${file(serverless-dev.yml):override_subgrp_config}
   XRAY_TRACING_ENABLED: ${file(serverless-dev.yml):xray_tracing_enabled}
 
   CONTIGUOUS_START_BUFFER_MINUTES: 5
@@ -39,7 +40,7 @@ provider:
   runtime: python3.9
   region: ap-south-1
   layers:
-    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:27
+    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:29
     - arn:aws:lambda:ap-south-1:336392948345:layer:AWSSDKPandas-Python39:12
   tracing:
     lambda: ${self:custom.XRAY_TRACING_ENABLED}
@@ -95,6 +96,25 @@ functions:
       REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
       RATE_LIMIT_CALLS: ${self:custom.OVERRIDE_THROTTLING_CONFIG.lambda_rate_limit_config.calls_limit}
       RATE_LIMIT_PERIOD_SEC: ${self:custom.OVERRIDE_THROTTLING_CONFIG.lambda_rate_limit_config.period_sec}
+      DEFAULT_OVERRIDE_DURATION_MINUTES: 30
+      DLC_OVERRIDE_SM_ARN:
+        Ref: DLCOverrideStateMachine
+  dlc-override-subgrp-fn:
+    handler: src/lambdas/dlc_override_subgrp_fn.lambda_handler
+    name: "load-control-subgrp-fn"
+    description: "Sub-grouping for grouped requests."
+    memorySize: 2048
+    timeout: 180  # 3 minutes
+    events:
+      - sqs:
+          arn: arn:aws:sqs:ap-south-1:752671163579:load-control-group-request-queue
+          maximumConcurrency: ${self:custom.OVERRIDE_SUBGRP_CONFIG.queue_config.max_concurrency}
+          batchSize: ${self:custom.OVERRIDE_SUBGRP_CONFIG.queue_config.batch_size}
+          maximumBatchingWindow: ${self:custom.OVERRIDE_SUBGRP_CONFIG.queue_config.batch_window}
+          functionResponseType: ReportBatchItemFailures
+    environment:
+      SUBSCRIPTION_TABLE_NAME: ${self:custom.SUBSCRIPTION_TABLE_NAME}
+      REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
       DEFAULT_OVERRIDE_DURATION_MINUTES: 30
       DLC_OVERRIDE_SM_ARN:
         Ref: DLCOverrideStateMachine

@@ -15,9 +15,10 @@ from src.config.config import AppConfig
 from aws_lambda_powertools import Tracer
 import ast
 import pandas as pd
-from src.utils.aws_utils import send_sqs_message
+from src.utils.tracker_utils import (
+    new_get_contiguous_request,
+)
 
-# from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
 from aws_lambda_powertools.utilities.batch import (
     BatchProcessor,
     process_partial_response,
@@ -29,6 +30,7 @@ from src.lambdas.dlc_event_helper import assemble_event_payload
 from src.statemachine.state_machine_handler import StateMachineHandler
 from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.tracker_utils import update_tracker, is_request_pending_state_machine
+from src.utils.request_validator import RequestValidator
 
 # Environmental variables
 # KINESIS_DATA_STREAM_NAME: str = os.environ.get("KINESIS_DATA_STREAM_NAME")
@@ -45,10 +47,6 @@ DEFAULT_OVERRIDE_DURATION_MINUTES: int = int(
 LOAD_CONTROL_TRACER_NAME = "dlc"
 LOAD_CONTROL_ALERT_SOURCE = "dlc-override-throttle-fn"
 LOAD_CONTROL_ALERT_FORMAT = "Load Control Override has Failed - {hint}"
-
-OVERRIDE_SUBGRP_QUEUE = os.environ.get(
-    "OVERRIDE_SUBGRP_QUEUE", "load-control-group-request-queue"
-)
 
 # Global variables
 processor = BatchProcessor(event_type=EventType.SQS)
@@ -174,98 +172,57 @@ def update_status(response, start, end, correlation_id):
     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
-def update_start_end_times_on_request(
-    request: Dict[str, Any]
-) -> Tuple[datetime, datetime]:
-    """
-    Mutates the start and end times on the request so that it matches the expected format
-    and instantiates the values if they are missing.
-
-    :param request: The request dictionary (mutable).
-    :returns: (start datetime, end datetime) of the request in UTC.
-    """
-    start = datetime.now(tz=timezone.utc)
-    if "start_datetime" in request:
-        start = datetime.fromisoformat(request["start_datetime"])
-        start = start.astimezone(tz=timezone.utc)
-    request["start_datetime"] = start.isoformat(timespec="seconds")
-
-    end = start + timedelta(minutes=DEFAULT_OVERRIDE_DURATION_MINUTES)
-    if "end_datetime" in request:
-        end = datetime.fromisoformat(request["end_datetime"])
-        end = end.astimezone(tz=timezone.utc)
-    request["end_datetime"] = end.isoformat(timespec="seconds")
-    return start, end
-
-
 def initiate_step_function(
     correlation_id: str, start: datetime, end: datetime, request: Dict[str, Any]
 ):
     """
-    Initiates the step function that will process override DLC request.
+    Process a single SQS record. This function is also rate limited.
+    The `@RateLimiter` is used to rate limit events that contain more records than the rate limit. In which case it
+    will force a wait time between rate limited batches.
+    e.g. if we have 1000 records, and we are limited to 500 per 30 seconds. This will enforce that the next batch
+    won't be processed until the period is complete.
+    libray: https://pypi.org/project/ratelimiter
 
-    :param correlation_id: The correlation id for the request.
-    :param start: The start of the DLC request.
-    :param end: The end of the DLC request.
-    :param request: The DLC request.
+    :param record: The SQS record.
     """
+
     step_function_client = get_step_function_client()
     try:
         logger.info("Starting step function execution id: %s", correlation_id)
-
+        sm_handler = StateMachineHandler(
+            step_function_client, AppConfig.DLC_OVERRIDE_SM_ARN
+        )
+        step_function_id = correlation_id
         if not isinstance(correlation_id, str):
-            logger.info("Sending grouped request to sub grouping queue")
-            response = send_sqs_message(OVERRIDE_SUBGRP_QUEUE, request)
-            # status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
-            # if status_code == HTTPStatus.OK:
-            #     logger.info("Successfully queued DLC request on throttling queue.")
-            #     return format_response(
-            #         HTTPStatus.OK,
-            #         {
-            #             "message": "DLC request accepted",
-            #             "correlation_id": correlation_id,
-            #         },
-            #     )
+            step_function_id = "GRP-" + correlation_id[0]
 
-            # error_message = f"Sending DLC request to throttling queue resulted in {status_code} status code"
-            # report_errors(correlation_id, datetime.now(tz=timezone.utc), error_message)
-            # return format_response(
-            #     HTTPStatus.INTERNAL_SERVER_ERROR,
-            #     {
-            #         "message": "DLC request failed",
-            #         "correlation_id": correlation_id,
-            #         "error": error_message,
-            #     },
-            # )
-        else:
-            sm_handler = StateMachineHandler(
-                step_function_client, AppConfig.DLC_OVERRIDE_SM_ARN
-            )
-            response = sm_handler.initiate(
-                correlation_id, json.dumps(request, cls=JSONEncoder)
-            )
-            status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
+        response = sm_handler.initiate(
+            step_function_id, json.dumps(request, cls=JSONEncoder)
+        )
+        status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
 
-            if status_code == HTTPStatus.OK:
-                update_status(response, start, end, correlation_id)
-                # payload = assemble_event_payload(correlation_id, Stage.QUEUED, start_date)
-                # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+        if status_code == HTTPStatus.OK:
+            if not isinstance(correlation_id, str):
+                partial_update_status = partial(update_status, response, start, end)
+                list(map(partial_update_status, correlation_id))
                 return
+            update_status(response, start, end, correlation_id)
+            # payload = assemble_event_payload(correlation_id, Stage.QUEUED, start_date)
+            # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+            return
 
-            error_message = (
-                f"Launching DLC request resulted in {status_code} status code"
-            )
-            reject_request(
-                correlation_id=correlation_id,
-                message=error_message,
-                request_start_date=start,
-                request_end_date=end,
-            )
-            report_error(
-                correlation_id=correlation_id,
-                reason="DLC request failed",
-                subject_hint="Failed Request",
-            )
+        error_message = f"Launching DLC request resulted in {status_code} status code"
+        reject_request(
+            correlation_id=correlation_id,
+            message=error_message,
+            request_start_date=start,
+            request_end_date=end,
+        )
+        report_error(
+            correlation_id=correlation_id,
+            reason="DLC request failed",
+            subject_hint="Failed Request",
+        )
 
     except step_function_client.exceptions.ExecutionAlreadyExists:
         logger.info(
@@ -285,111 +242,63 @@ def initiate_step_function(
         )
 
 
-def remove_processed_records(obj):
-    if is_request_pending_state_machine(obj["correlation_id"]):
-        return obj, obj["site"], obj["switch_addresses"], obj["correlation_id"]
-    else:
-        logger.info(
-            "Request with matching correlation id: %s, has already been processed.",
-            obj["correlation_id"],
-        )
+def record_handler(record):
+    logger.info("Starting to process DLC request: %s", record["request"])
+    correlation_id = record["request"]["correlation_id"]
 
+    start = datetime.fromisoformat(record["request"]["start_datetime"])
+    start = start.astimezone(tz=timezone.utc)
+    record["request"]["start_datetime"] = start.isoformat(timespec="seconds")
 
-@RateLimiter(max_calls=RATE_LIMIT_CALLS, period=RATE_LIMIT_PERIOD_SEC)
-def record_handler(record: SQSRecord):
-    """
-    Process a single SQS record. This function is also rate limited.
-    The `@RateLimiter` is used to rate limit events that contain more records than the rate limit. In which case it
-    will force a wait time between rate limited batches.
-    e.g. if we have 1000 records, and we are limited to 500 per 30 seconds. This will enforce that the next batch
-    won't be processed until the period is complete.
-    libray: https://pypi.org/project/ratelimiter
+    end = datetime.fromisoformat(record["request"]["end_datetime"])
+    end = end.astimezone(tz=timezone.utc)
+    record["request"]["end_datetime"] = end.isoformat(timespec="seconds")
 
-    :param record: The SQS record.
-    """
-    # request = record.json_body
-    # correlation_id = request["correlation_id"]
-    # if not is_request_pending_state_machine(correlation_id): # todo : remove unwanted records
-    #     logger.info("Request with matching correlation id: %s, has already been processed.", correlation_id)
-    #     return
-    logger.info("Inside Record Handler")
-    logger.info(record)
-    if not isinstance(record["correlation_id"], str):
-        (
-            record["site_switch_crl_id"],
-            record["site"],
-            record["switch_addresses"],
-            record["correlation_id"],
-        ) = zip(*map(remove_processed_records, record["site_switch_crl_id"]))
-
-    correlation_id = record["correlation_id"]
-
-    request_start, request_end = update_start_end_times_on_request(record)
-    if not correlation_id:
-        reject_request([], message="No Valid correlation_id")
-    if request_end <= datetime.now(tz=timezone.utc):
-        # logger.error("Request with correlation_id '%s', has been throttled for too long", correlation_id) # todo
-        reject_request(
-            correlation_id,
-            message="Request is rejected as it has a end datetime in the past",
-        )
-        return
-
-    logger.info(
-        "Starting to process DLC request with correlation_id: %s", correlation_id
-    )
     initiate_step_function(
         correlation_id=correlation_id,
-        start=request_start,
-        end=request_end,
-        request=record,
+        start=start,
+        end=end,
+        request=record["request"],
     )
 
 
-def group_records(event):
+def group_records(request):
     """
     Process records in event and get the all 'body'.
     Split the records that not have the group_id in 'body'.
     Group records that have group_id and add new field 'site_and_switch'.
     Finally, merge the both records and return.
     """
-    data = [ast.literal_eval(i["body"]) for i in event["Records"]]
 
-    df = pd.DataFrame(data)
-    if "group_id" not in df:
-        df["group_id"] = None
-    try:
-        nan_df = df[pd.isna(df["group_id"])]
-        if not nan_df.empty:
-            nan_df = df[df.group_id.isna()]
-            df = df.drop(nan_df.index)
-            nan_df = nan_df.where(pd.notnull(nan_df), None)
-            nan_df = nan_df.to_dict(orient="records")
+    logger.info("group input:\n%s", request)
+    response = {}
+    responses = []
+
+    # Get request(s) that are previously contiguous to this one.
+    contiguous_requests = new_get_contiguous_request(request)
+
+    # Contiguous with the same switch direction
+    for contiguous_request in contiguous_requests:
+        # Contiguous with the same switch direction
+        if request["status"] == contiguous_request["overrdValue"]:
+            logger.info("Contiguous request: %s", contiguous_request)
+            # logger.debug("Terminal request: %s", terminal_request)
+            contiguous_request["flag"] = "cont-extend"
+
+        # Contiguous with the opposite switch direction
         else:
-            nan_df = []
-    except Exception as e:
-        print("error", str(e))
-    if not df.empty:
-        grouped_df = (
-            df.groupby(["group_id", "status", "start_datetime", "end_datetime"])
-            .agg({"switch_addresses": list, "site": list, "correlation_id": list})
-            .reset_index()
-        )
+            contiguous_request["flag"] = "cont-create"
 
-        grouped_df["site_switch_crl_id"] = grouped_df.apply(
-            lambda row: [
-                {"site": s, "switch_addresses": sa, "correlation_id": c}
-                for s, sa, c in zip(
-                    row["site"], row["switch_addresses"], row["correlation_id"]
-                )
-            ],
-            axis=1,
-        )
-        grouped_df = grouped_df.to_dict(orient="records")
-    else:
-        grouped_df = []
+        response["request"] = contiguous_request
+        responses.append(response)
+    # else:
+    #     # No contiguous request - create a new stand-alone policy and deploy straight away.
+    if request["switch_addresses"]:
+        response["request"] = request
+        responses.append(response)
 
-    return grouped_df + nan_df
+    logger.info("group output:\n%s", responses)
+    list(map(record_handler, responses))
 
 
 # @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
@@ -403,13 +312,13 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
     """
 
     try:
-        logger.info("Events from SQS")
+        logger.info("Events from Sub Group SQS")
         logger.info(event)
         start_time = time.time()
         start_time = time.time()
-        # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
-        #                                   context=context)
-        result = list(map(record_handler, group_records(event)))
+        request = [ast.literal_eval(i["body"]) for i in event["Records"]]
+        result = list(map(group_records, request))
+
         end_time = time.time()
 
         expected_runtime = int(
