@@ -584,12 +584,8 @@ def handle_create_policy(request: dict):
                     if response["statusCode"] == HTTP_SUCCESS:
                         # Check to see when we can deploy this policy - if the contiguous policy is currently
                         # being enforced ("now" between start and end date), we can deploy immediately.
-                        start: datetime = datetime.fromisoformat(
-                            contiguous_request["rqstStrtDt"]
-                        )
-                        end: datetime = datetime.fromisoformat(
-                            contiguous_request["rqstEndDt"]
-                        )
+                        start: datetime = datetime.fromisoformat(request["rqstStrtDt"])
+                        end: datetime = datetime.fromisoformat(request["rqstEndDt"])
 
                         if not is_being_enforced(start, end, now):
                             # Policy currently NOT being enforced.
