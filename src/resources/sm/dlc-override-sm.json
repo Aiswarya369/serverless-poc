@@ -10,13 +10,13 @@
           "States": {     
             "Log Request": {
               "Type": "Pass",
-              "Next": "Create LC Override Policy",
+              "Next": "Validate and Group LC Requests",
               "Parameters": {
-                "action": "createDLCPolicy",
+                "action": "groupLCRequests",
                 "request.$": "$"
               }
             },
-            "Create LC Override Policy": {
+            "Validate and Group LC Requests": {
               "Type": "Task",
               "Resource": "arn:aws:states:::lambda:invoke",
               "Parameters": {
@@ -35,26 +35,50 @@
                   "BackoffRate": 2
                 }
               ],
-              "Next": "Map",
+              "Next": "Process LC Override Requests",
               "ResultSelector": {
                 "Payload.$": "$.Payload"
               }
             },
-            "Map": {
+            "Process LC Override Requests": {
               "Type": "Map",
               "ItemProcessor": {
                 "ProcessorConfig": {
                   "Mode": "DISTRIBUTED",
                   "ExecutionType": "EXPRESS"
                 },
-                "StartAt": "If Policy Creation Succeeded",
+                "StartAt": "Create LC Override Policy",
                 "States": {
+                  "Create LC Override Policy": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "Payload.$": "$",
+                      "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "Lambda.ServiceException",
+                          "Lambda.AWSLambdaException",
+                          "Lambda.SdkClientException"
+                        ],
+                        "IntervalSeconds": 2,
+                        "MaxAttempts": 6,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "Next": "If Policy Creation Succeeded",
+                    "ResultSelector": {
+                      "Payload.$": "$.Payload"
+                    }
+                  },
                   "If Policy Creation Succeeded": {
                     "Type": "Choice",
                     "Choices": [
                       {
                         "Not": {
-                          "Variable": "$.statusCode",
+                          "Variable": "$.Payload.statusCode",
                           "NumericEquals": 200
                         },
                         "Next": "Internal Fail"
@@ -68,15 +92,15 @@
                   },
                   "Policy Deployment Wait": {
                     "Type": "Wait",
-                    "TimestampPath": "$.deploy_start_datetime",
+                    "TimestampPath": "$.Payload.deploy_start_datetime",
                     "Next": "Prepare Deploy Policy Request"
                   },
                   "Prepare Deploy Policy Request": {
                     "Type": "Pass",
                     "Parameters": {
                       "action": "deployDLCPolicy",
-                      "request.$": "$.request",
-                      "policyID.$": "$.policyID"
+                      "request.$": "$.Payload.request",
+                      "policyID.$": "$.Payload.policyID"
                     },
                     "Next": "Deploy LC Override Policy"
                   },
@@ -127,7 +151,8 @@
               "End": true,
               "InputPath": "$.Payload",
               "Label": "Map",
-              "MaxConcurrency": 100
+              "MaxConcurrency": 100,
+              "ToleratedFailurePercentage": 100
             }
           }
         }

@@ -552,6 +552,46 @@ def is_being_enforced(start: datetime, end: datetime, now: datetime):
     return True if start <= now < end else False
 
 
+def handle_contiguous_records(request: dict):
+    """
+    Process records in event and get the all 'body'.
+    Split the records that not have the group_id in 'body'.
+    Group records that have group_id and add new field 'site_and_switch'.
+    Finally, merge the both records and return.
+    """
+
+    logger.info("group input:\n%s", request)
+    response = {}
+    responses = []
+
+    # Get request(s) that are previously contiguous to this one.
+    contiguous_requests = new_get_contiguous_request(request)
+
+    # Contiguous with the same switch direction
+    for contiguous_request in contiguous_requests:
+        response["action"] = "createDLCPolicy"
+        # Contiguous with the same switch direction
+        if request["status"] == contiguous_request["overrdValue"]:
+            logger.info("Contiguous request: %s", contiguous_request)
+            # logger.debug("Terminal request: %s", terminal_request)
+            contiguous_request["flag"] = "cont-extend"
+
+        # Contiguous with the opposite switch direction
+        else:
+            contiguous_request["flag"] = "cont-create"
+
+        response["request"] = contiguous_request
+        responses.append(response)
+    # else:
+    #     # No contiguous request - create a new stand-alone policy and deploy straight away.
+    if request["switch_addresses"]:
+        response["request"] = request
+        response["action"] = "createDLCPolicy"
+        responses.append(response)
+
+    return responses
+
+
 def handle_create_policy(request: dict):
     """
     PolicyNet policy creation.
@@ -575,7 +615,6 @@ def handle_create_policy(request: dict):
     errors: list = RequestValidator.validate_dlc_override_request(
         request, DEFAULT_OVERRIDE_DURATION_MINUTES, check=False
     )
-    responses = []
 
     if errors:
         if isinstance(correlation_id, list):
@@ -590,74 +629,121 @@ def handle_create_policy(request: dict):
             "errorDetails": [e.error for e in errors],
         }
     else:
-        # Get request(s) that are previously contiguous to this one.
-        contiguous_requests = new_get_contiguous_request(request)
-
         now: datetime = datetime.now(timezone.utc)
         deploy_start_datetime: str = now.strftime(POLICY_DEPLOY_DATETIME_FORMAT)
-        # logger.debug("Default policy deployment start datetime: %s", deploy_start_datetime)
+        if not isinstance(correlation_id, list):
+            # Get request(s) that are previously contiguous to this one.
+            contiguous_requests = new_get_contiguous_request(request)
+            # logger.debug("Default policy deployment start datetime: %s", deploy_start_datetime)
 
-        # Contiguous with the same switch direction
-        for contiguous_request in contiguous_requests:
             # Contiguous with the same switch direction
-            if request["status"] == contiguous_request["overrdValue"]:
-                logger.debug("Contiguous request: %s", contiguous_request)
-                # logger.debug("Terminal request: %s", terminal_request)
+            for contiguous_request in contiguous_requests:
+                # Contiguous with the same switch direction
+                if request["status"] == contiguous_request["overrdValue"]:
+                    logger.debug("Contiguous request: %s", contiguous_request)
+                    # logger.debug("Terminal request: %s", terminal_request)
 
-                # Extend policy in PolicyNet.
-                response: dict = extend_policy(contiguous_request)
+                    # Extend policy in PolicyNet.
+                    response: dict = extend_policy(contiguous_request)
 
-                if response["statusCode"] == HTTP_SUCCESS:
-                    # Check to see when we can deploy this policy - if the contiguous policy is currently
-                    # being enforced ("now" between start and end date), we can deploy immediately.
-                    start: datetime = datetime.fromisoformat(
-                        contiguous_request["rqstStrtDt"]
+                    if response["statusCode"] == HTTP_SUCCESS:
+                        # Check to see when we can deploy this policy - if the contiguous policy is currently
+                        # being enforced ("now" between start and end date), we can deploy immediately.
+                        start: datetime = datetime.fromisoformat(
+                            contiguous_request["rqstStrtDt"]
+                        )
+                        end: datetime = datetime.fromisoformat(
+                            contiguous_request["rqstEndDt"]
+                        )
+
+                        if not is_being_enforced(start, end, now):
+                            # Policy currently NOT being enforced.
+                            # We need to pause deployment until after the contiguous policy is being enforced.
+                            deploy_start: datetime = start + timedelta(
+                                minutes=CONTIGUOUS_START_BUFFER_MINUTES
+                            )
+                            deploy_start_datetime: str = deploy_start.strftime(
+                                POLICY_DEPLOY_DATETIME_FORMAT
+                            )
+                            logger.info(
+                                "Setting policy deployment start datetime to %s",
+                                deploy_start_datetime,
+                            )
+
+                # Contiguous with the opposite switch direction
+                else:
+                    # When there is a contiguous request of the opposite switch direction we need to push back the start
+                    # datetime so the contiguous request has time to finish as it doesn't finish exactly at the end time in
+                    # PolicyNet.
+                    start_datetime: datetime = datetime.fromisoformat(
+                        request["start_datetime"]
                     )
-                    end: datetime = datetime.fromisoformat(
-                        contiguous_request["rqstEndDt"]
+                    start_datetime += timedelta(
+                        minutes=OPPOSITE_SWITCH_DIRECTION_BACKOFF
                     )
+                    start_datetime_str: str = start_datetime.isoformat()
 
-                    if not is_being_enforced(start, end, now):
-                        # Policy currently NOT being enforced.
-                        # We need to pause deployment until after the contiguous policy is being enforced.
-                        deploy_start: datetime = start + timedelta(
-                            minutes=CONTIGUOUS_START_BUFFER_MINUTES
-                        )
-                        deploy_start_datetime: str = deploy_start.strftime(
-                            POLICY_DEPLOY_DATETIME_FORMAT
-                        )
-                        logger.info(
-                            "Setting policy deployment start datetime to %s",
-                            deploy_start_datetime,
-                        )
-
-            # Contiguous with the opposite switch direction
-            else:
-                # When there is a contiguous request of the opposite switch direction we need to push back the start
-                # datetime so the contiguous request has time to finish as it doesn't finish exactly at the end time in
-                # PolicyNet.
-                start_datetime: datetime = datetime.fromisoformat(
-                    request["start_datetime"]
-                )
-                start_datetime += timedelta(minutes=OPPOSITE_SWITCH_DIRECTION_BACKOFF)
-                start_datetime_str: str = start_datetime.isoformat()
-
-                request["start_datetime"] = start_datetime_str
-                request["replace"] = True
+                    request["start_datetime"] = start_datetime_str
+                    request["replace"] = True
+                    response: dict = create_policy(request)
+                response["deploy_start_datetime"] = deploy_start_datetime
+                response["request"] = contiguous_request
+                # responses.append(response)
+            # else:
+            #     # No contiguous request - create a new stand-alone policy and deploy straight away.
+            if request["switch_addresses"]:
+                request["replace"] = False
                 response: dict = create_policy(request)
-            response["deploy_start_datetime"] = deploy_start_datetime
-            response["request"] = contiguous_request
-            responses.append(response)
-        # else:
-        #     # No contiguous request - create a new stand-alone policy and deploy straight away.
-        if request["switch_addresses"]:
-            request["replace"] = False
-            response: dict = create_policy(request)
-            response["deploy_start_datetime"] = deploy_start_datetime
-            response["request"] = request
-            responses.append(response)
+                response["deploy_start_datetime"] = deploy_start_datetime
+                response["request"] = request
+                # responses.append(response)
+        else:
+            if "flag" in request:
+                if request["flag"] == "cont-extend":
+                    response: dict = extend_policy(request)
+
+                    if response["statusCode"] == HTTP_SUCCESS:
+                        # Check to see when we can deploy this policy - if the contiguous policy is currently
+                        # being enforced ("now" between start and end date), we can deploy immediately.
+                        start: datetime = datetime.fromisoformat(request["rqstStrtDt"])
+                        end: datetime = datetime.fromisoformat(request["rqstEndDt"])
+
+                        if not is_being_enforced(start, end, now):
+                            # Policy currently NOT being enforced.
+                            # We need to pause deployment until after the contiguous policy is being enforced.
+                            deploy_start: datetime = start + timedelta(
+                                minutes=CONTIGUOUS_START_BUFFER_MINUTES
+                            )
+                            deploy_start_datetime: str = deploy_start.strftime(
+                                POLICY_DEPLOY_DATETIME_FORMAT
+                            )
+                            logger.info(
+                                "Setting policy deployment start datetime to %s",
+                                deploy_start_datetime,
+                            )
+
+                elif request["flag"] and request["flag"] == "cont-create":
+                    start_datetime: datetime = datetime.fromisoformat(
+                        request["start_datetime"]
+                    )
+                    start_datetime += timedelta(
+                        minutes=OPPOSITE_SWITCH_DIRECTION_BACKOFF
+                    )
+                    start_datetime_str: str = start_datetime.isoformat()
+
+                    request["start_datetime"] = start_datetime_str
+                    request["replace"] = True
+                    response: dict = create_policy(request)
+            else:
+                request["replace"] = False
+                response: dict = create_policy(request)
+                response["deploy_start_datetime"] = deploy_start_datetime
+                response["request"] = request
+                # responses.append(response)
+
         # Add the policy deployment start datetime.
-        return responses
+        logger.info("Create policy Response : %s", response)
+        return response
 
 
 def handle_deploy_policy(event: dict):
@@ -768,10 +854,11 @@ def lambda_handler(event: dict, _):
     #                                       session_lifetime=PNET_SESSION_LIFETIME_SECONDS)
     #     policynet_client.set_credentials(pnet_auth_details['pnet_username'], pnet_auth_details['pnet_password'])
     #     logger.debug("Set credentials in PolicyNet client")
-
+    if action == SupportedOverrideSMActions.GET_CONTIGUOUS_RECORDS.value:
+        response = handle_contiguous_records(request)
+        return response if type(response) == list else [response]
     if action == SupportedOverrideSMActions.CREATE_DLC_POLICY.value:
         response = handle_create_policy(request)
-        return response if type(response) == list else [response]
     elif action == SupportedOverrideSMActions.DEPLOY_DLC_POLICY.value:
         response = handle_deploy_policy(event)
         # elif action == SupportedOverrideSMActions.LOGOUT_PNET.value:

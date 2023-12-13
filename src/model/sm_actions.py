@@ -5,6 +5,7 @@ class SupportedOverrideSMActions(Enum):
     CREATE_DLC_POLICY = "createDLCPolicy"
     DEPLOY_DLC_POLICY = "deployDLCPolicy"
     LOGOUT_PNET = "logoutPolicyNet"
+    GET_CONTIGUOUS_RECORDS = "groupLCRequests"
 
     # These two values are not in use currently.
     UNDEPLOY_DLC_POLICY = "undeployDLCPolicy"
