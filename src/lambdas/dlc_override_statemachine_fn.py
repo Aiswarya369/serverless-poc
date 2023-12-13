@@ -313,6 +313,87 @@ def create_policy(request: dict):
     return response
 
 
+def extend_policy_update_tracker(
+    data=None, event_datetime=None, response=None, policy_name=None, request=None
+):
+    status_code: int = response["statusCode"]
+    message: str = response["message"]
+    policy_id: int = response["policyID"]
+    now: datetime = event_datetime
+    correlation_id = data["correlation_id"]
+    start_datetime = datetime.fromisoformat(request["start_datetime"])
+    end_datetime = datetime.fromisoformat(request["end_datetime"])
+    # new_start = request['start_datetime']
+    # new_end = request['end_datetime']
+    if status_code == HTTP_SUCCESS:
+        # Update tracker with the following details:
+        #
+        # request 1: EXTENDED_BY 2 (also send to Kinesis)
+        # request 2: EXTENDS 1 (also send to Kinesis)
+        # request 2: Existing (previous) policy has been successfully extended in PolicyNet.
+        #
+        # 1. Update the contiguous request to indicate it has been extended.
+        contiguous_correlation_id: str = data["crrltnId"]
+        extend_message: str = f"Request {contiguous_correlation_id} has been extended by request {correlation_id}"
+
+        update_tracker(
+            correlation_id=contiguous_correlation_id,
+            stage=Stage.EXTENDED_BY,
+            event_datetime=now,
+            message=extend_message,
+            # request_start_date=request['rqstStrtDt'],
+            # request_end_date=new_start,
+            extended_by=data["correlation_id"],
+        )
+
+        # Send to Kinesis.
+        # payload: dict = assemble_event_payload(contiguous_correlation_id, Stage.EXTENDED_BY, now, extend_message)
+        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+        # 2. Update the new request to indicate that it is extending a previous request.
+        extend_message = (
+            f"Request {correlation_id} extends request {contiguous_correlation_id}"
+        )
+
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.EXTENDS,
+            event_datetime=now,
+            message=extend_message,
+            request_start_date=start_datetime,
+            request_end_date=end_datetime,
+            extends=contiguous_correlation_id,
+            original_start_datetime=request["original_start_datetime"],
+        )
+
+        # Send to Kinesis.
+        # payload: dict = assemble_event_payload(correlation_id, Stage.EXTENDS, now, extend_message)
+        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+        # 3. Update the new request to say the extension has been successfully applied to PolicyNet.
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.POLICY_EXTENDED,
+            event_datetime=now,
+            message=message,
+            policy_name=policy_name,
+            policy_id=policy_id,
+        )
+    else:
+        # Update tracker.
+        update_tracker(
+            correlation_id=correlation_id,
+            stage=Stage.DECLINED,
+            event_datetime=now,
+            message=message,
+            policy_name=policy_name,
+        )
+
+        # Send to Kinesis.
+        # payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
+        # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
 def extend_policy(request):
     """
     Extend policy in PolicyNet.
@@ -325,12 +406,15 @@ def extend_policy(request):
     """
     logger.info("Extending existing policy in PolicyNet")
 
+    # terminal_start: datetime = datetime.fromisoformat(request["rqstStrtDt"])
+    # terminal_end: datetime = datetime.fromisoformat(request["original_start_datetime"])
+    # contiguous_start: datetime = datetime.fromisoformat(
+    #     contiguous_request["rqstStrtDt"]
+    # )
+    # contiguous_end: datetime = datetime.fromisoformat(contiguous_request["rqstEndDt"])
+
     terminal_start: datetime = datetime.fromisoformat(request["rqstStrtDt"])
     terminal_end: datetime = datetime.fromisoformat(request["original_start_datetime"])
-    contiguous_start: datetime = datetime.fromisoformat(
-        contiguous_request["rqstStrtDt"]
-    )
-    contiguous_end: datetime = datetime.fromisoformat(contiguous_request["rqstEndDt"])
 
     # New request's start and end dates will be added as default values when we initiated the Step Function execution
     # if they were not explicitly provided.
@@ -341,14 +425,14 @@ def extend_policy(request):
     # to derive an extended period for the existing request.
     duration = int((new_end - terminal_start).total_seconds() / 60)
 
-    logger.debug("Terminal request was from %s to %s", terminal_start, terminal_end)
-    logger.debug(
-        "Contiguous request was from %s to %s", contiguous_start, contiguous_end
-    )
-    logger.debug("New request is from %s to %s", new_start, new_end)
-    logger.debug(
-        "Extended policy will be from %s for %s minutes", terminal_start, duration
-    )
+    # logger.debug("Terminal request was from %s to %s", terminal_start, terminal_end)
+    # logger.debug(
+    #     "Contiguous request was from %s to %s", contiguous_start, contiguous_end
+    # )
+    # logger.debug("New request is from %s to %s", new_start, new_end)
+    # logger.debug(
+    #     "Extended policy will be from %s for %s minutes", terminal_start, duration
+    # )
 
     turn_off: bool = False if request["status"] == "ON" else True
 
@@ -357,12 +441,13 @@ def extend_policy(request):
     # with event datetimes.
     now: datetime = datetime.now(timezone.utc)
 
-    policy_name, response = policynet_client.replace_lc_override_schedule_policy(
+    policy_name, response = replace_lc_override_schedule_policy(
         meter_serials=request["switch_addresses"],
         start_datetime=terminal_start,
         turn_off=turn_off,
         duration=duration,
     )
+
     status_code: int = response["statusCode"]
     message: str = response["message"]
     policy_id: int = response["policyID"]
@@ -382,6 +467,8 @@ def extend_policy(request):
         request=request,
     )
     list(map(partial_extend_policy_update_tracker, request["site_switch_crl_id"]))
+
+    return response
 
     # if status_code == HTTP_SUCCESS:
     #     # Update tracker with the following details:
