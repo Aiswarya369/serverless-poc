@@ -4,12 +4,12 @@ import json
 url = "https://bwfok9l56k.execute-api.ap-south-1.amazonaws.com/dev/service/lc/load/e67baf7fb8514a378baf08b0b4273856"
 headers = {"Content-Type": "application/json"}
 
-for i in range(1, 4):
+for i in range(1, 2):
     payload = json.dumps(
         {
             "site": "AJ0000000{}".format(i),
-            "start_datetime": "2023-12-13T19:30:00+00:00",
-            "end_datetime": "2023-12-13T20:00:00+00:00",
+            "start_datetime": "2023-12-14T14:00:00+00:00",
+            "end_datetime": "2023-12-14T14:30:00+00:00",
             "status": "ON",
             "switch_addresses": "LG02210255{}".format(i),
             "group_id": "g1",
@@ -22,8 +22,8 @@ for i in range(1, 4):
 #     payload = json.dumps(
 #         {
 #             "site": "AJ0000000{}".format(i),
-#             "start_datetime": "2023-12-13T17:30:00+00:00",
-#             "end_datetime": "2023-12-13T17:00:00+00:00",
+#             "start_datetime": "2023-12-14T11:15:00+00:00",
+#             "end_datetime": "2023-12-14T11:30:00+00:00",
 #             "status": "ON",
 #             "switch_addresses": "LG02210255{}".format(i),
 #             "group_id": "g1",

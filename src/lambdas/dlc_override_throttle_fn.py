@@ -310,12 +310,16 @@ def record_handler(record: SQSRecord):
         )
         return
 
+    request = {}
+    request["action"] = "groupLCRequests"
+    request["request"] = record
+
     # logger.info("Starting to process DLC request with correlation_id: %s", correlation_id)
     initiate_step_function(
         correlation_id=correlation_id,
         start=request_start,
         end=request_end,
-        request=record,
+        request=request,
     )
 
 
@@ -376,8 +380,8 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
     """
 
     try:
-        logger.info("Events from SQS")
-        logger.info(event)
+        logger.info("Events from SQS: %s", event)
+
         start_time = time.time()
         start_time = time.time()
         # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,

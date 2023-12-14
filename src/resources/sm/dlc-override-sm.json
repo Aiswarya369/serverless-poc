@@ -6,16 +6,8 @@
       "Type": "Parallel",
       "Branches": [
         {
-          "StartAt": "Log Request",
+          "StartAt": "Validate and Group LC Requests",
           "States": {     
-            "Log Request": {
-              "Type": "Pass",
-              "Next": "Validate and Group LC Requests",
-              "Parameters": {
-                "action": "groupLCRequests",
-                "request.$": "$"
-              }
-            },
             "Validate and Group LC Requests": {
               "Type": "Task",
               "Resource": "arn:aws:states:::lambda:invoke",
@@ -23,18 +15,6 @@
                 "Payload.$": "$",
                 "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
               },
-              "Retry": [
-                {
-                  "ErrorEquals": [
-                    "Lambda.ServiceException",
-                    "Lambda.AWSLambdaException",
-                    "Lambda.SdkClientException"
-                  ],
-                  "IntervalSeconds": 2,
-                  "MaxAttempts": 6,
-                  "BackoffRate": 2
-                }
-              ],
               "Next": "Process LC Override Requests",
               "ResultSelector": {
                 "Payload.$": "$.Payload"
@@ -93,22 +73,13 @@
                   "Policy Deployment Wait": {
                     "Type": "Wait",
                     "TimestampPath": "$.Payload.deploy_start_datetime",
-                    "Next": "Prepare Deploy Policy Request"
-                  },
-                  "Prepare Deploy Policy Request": {
-                    "Type": "Pass",
-                    "Parameters": {
-                      "action": "deployDLCPolicy",
-                      "request.$": "$.Payload.request",
-                      "policyID.$": "$.Payload.policyID"
-                    },
                     "Next": "Deploy LC Override Policy"
                   },
                   "Deploy LC Override Policy": {
                     "Type": "Task",
                     "Resource": "arn:aws:states:::lambda:invoke",
                     "Parameters": {
-                      "Payload.$": "$",
+                      "Payload.$": "$.Payload",
                       "FunctionName": "arn:aws:lambda:${self:provider.region}:${aws:accountId}:function:load-control-statemachine-fn"
                     },
                     "Retry": [

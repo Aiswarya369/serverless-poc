@@ -199,11 +199,6 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     override_status: str = request["status"]
 
     # There should only be one meter serial supplied in "switch_addresses", as per validation.
-    # There should only be one meter serial supplied in "switch_addresses", as per validation.
-    # switch_addresses: Union[str, List[str]] = request["switch_addresses"]
-    # meter_serial_number: str = (
-    #     switch_addresses[0] if type(switch_addresses) == list else switch_addresses
-    # )
 
     switch_addresses: Union[str, List[str]] = request["switch_addresses"]
     meter_serial_number: str = (

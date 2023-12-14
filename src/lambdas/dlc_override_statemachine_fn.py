@@ -574,11 +574,11 @@ def handle_contiguous_records(request: dict):
         if request["status"] == contiguous_request["overrdValue"]:
             logger.info("Contiguous request: %s", contiguous_request)
             # logger.debug("Terminal request: %s", terminal_request)
-            contiguous_request["flag"] = "cont-extend"
+            contiguous_request["policyType"] = "contiguousExtension"
 
         # Contiguous with the opposite switch direction
         else:
-            contiguous_request["flag"] = "cont-create"
+            contiguous_request["policyType"] = "contiguousCreation"
 
         response["request"] = contiguous_request
         responses.append(response)
@@ -589,6 +589,7 @@ def handle_contiguous_records(request: dict):
         response["action"] = "createDLCPolicy"
         responses.append(response)
 
+    logger.info("handle_contiguous_records output :\n%s", responses)
     return responses
 
 
@@ -645,7 +646,6 @@ def handle_create_policy(request: dict):
 
                     # Extend policy in PolicyNet.
                     response: dict = extend_policy(contiguous_request)
-
                     if response["statusCode"] == HTTP_SUCCESS:
                         # Check to see when we can deploy this policy - if the contiguous policy is currently
                         # being enforced ("now" between start and end date), we can deploy immediately.
@@ -688,7 +688,7 @@ def handle_create_policy(request: dict):
                     response: dict = create_policy(request)
                 response["deploy_start_datetime"] = deploy_start_datetime
                 response["request"] = contiguous_request
-                # responses.append(response)
+                response["action"] = "deployDLCPolicy"
             # else:
             #     # No contiguous request - create a new stand-alone policy and deploy straight away.
             if request["switch_addresses"]:
@@ -696,10 +696,10 @@ def handle_create_policy(request: dict):
                 response: dict = create_policy(request)
                 response["deploy_start_datetime"] = deploy_start_datetime
                 response["request"] = request
-                # responses.append(response)
+                response["action"] = "deployDLCPolicy"
         else:
-            if "flag" in request:
-                if request["flag"] == "cont-extend":
+            if "policyType" in request:
+                if request["policyType"] == "contiguousExtension":
                     response: dict = extend_policy(request)
 
                     if response["statusCode"] == HTTP_SUCCESS:
@@ -722,7 +722,10 @@ def handle_create_policy(request: dict):
                                 deploy_start_datetime,
                             )
 
-                elif request["flag"] and request["flag"] == "cont-create":
+                elif (
+                    request["policyType"]
+                    and request["policyType"] == "contiguousCreate"
+                ):
                     start_datetime: datetime = datetime.fromisoformat(
                         request["start_datetime"]
                     )
@@ -739,6 +742,7 @@ def handle_create_policy(request: dict):
                 response: dict = create_policy(request)
                 response["deploy_start_datetime"] = deploy_start_datetime
                 response["request"] = request
+                response["action"] = "deployDLCPolicy"
                 # responses.append(response)
 
         # Add the policy deployment start datetime.
@@ -828,10 +832,8 @@ def lambda_handler(event: dict, _):
     """
     global policynet_client
 
-    logger.info("----------------")
     logger.info("Direct Load Control State Machine override running...")
     logger.info("Event: %s", str(event))
-    logger.info("----------------")
 
     if "action" not in event:
         return {
@@ -844,16 +846,6 @@ def lambda_handler(event: dict, _):
 
     request: dict = event["request"]
 
-    # Get PolicyNet credentials; set in our PolicyNet client object.
-    # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(AppConfig.PNET_AUTH_DETAILS_SECRET_ID)
-
-    # if not policynet_client:
-    #     url = pnet_auth_details['pnet_url']
-    #     policynet_client = PolicyNetClient(f"{url}/PolicyNet.wsdl", url, DYNAMO_RESOURCE,
-    #                                       session_table=PNET_SESSION_TABLE,
-    #                                       session_lifetime=PNET_SESSION_LIFETIME_SECONDS)
-    #     policynet_client.set_credentials(pnet_auth_details['pnet_username'], pnet_auth_details['pnet_password'])
-    #     logger.debug("Set credentials in PolicyNet client")
     if action == SupportedOverrideSMActions.GET_CONTIGUOUS_RECORDS.value:
         response = handle_contiguous_records(request)
         return response if type(response) == list else [response]
@@ -861,13 +853,13 @@ def lambda_handler(event: dict, _):
         response = handle_create_policy(request)
     elif action == SupportedOverrideSMActions.DEPLOY_DLC_POLICY.value:
         response = handle_deploy_policy(event)
-        # elif action == SupportedOverrideSMActions.LOGOUT_PNET.value:
-        #     policynet_client.logout()
+    # elif action == SupportedOverrideSMActions.LOGOUT_PNET.value:
+    #     policynet_client.logout()
 
-        response: dict = {
-            "statusCode": HTTP_SUCCESS,
-            "message": "Logged out successfully",
-        }
+    #     response: dict = {
+    #         "statusCode": HTTP_SUCCESS,
+    #         "message": "Logged out successfully"
+    #     }
     else:
         response = {
             "statusCode": HTTP_BAD_REQUEST,
