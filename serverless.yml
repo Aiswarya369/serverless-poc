@@ -47,9 +47,10 @@ provider:
       Resource: "*"
   layers:
     - Ref: PythonRequirementsLambdaLayer
-    - arn:aws:lambda:ap-south-1:336392948345:layer:AWSSDKPandas-Python39:12
+    # - arn:aws:lambda:ap-south-1:336392948345:layer:AWSSDKPandas-Python39:12
   tracing:
     lambda: ${self:custom.XRAY_TRACING_ENABLED}
+    
 
 package:
   individually: false

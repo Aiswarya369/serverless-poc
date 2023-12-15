@@ -7,7 +7,6 @@ from logging import Logger
 from typing import Tuple, Optional
 from boto3.dynamodb.conditions import Key, Attr
 from botocore.client import BaseClient
-import pandas as pd
 from src.model.enums import Stage, HeadEnd
 
 logging.basicConfig(
@@ -101,6 +100,7 @@ def create_tracker(
     if request_start_date:
         start: str = request_start_date.isoformat(timespec="seconds")
         header_item["rqstStrtDt"] = start
+
     if original_start_datetime:
         header_item["original_start_datetime"] = original_start_datetime
 
@@ -612,53 +612,89 @@ def group_contiguous_requests(existing_data, req_data):
     Group records that have group_id and add new field 'site_and_switch'.
     Finally, merge the both records and return.
     """
-    df = pd.DataFrame(existing_data)
-    if "site" in df:
-        del df["site"]
+    existing_data_list = existing_data if isinstance(existing_data, list) else []
+    req_data_list = req_data.get("site_switch_crl_id", [])
 
-    req_data_df = pd.DataFrame(req_data["site_switch_crl_id"])
-    req_data_df["group_id"] = req_data["group_id"]
-    req_data_df["status"] = req_data["status"]
-    req_data_df["start_datetime"] = req_data["start_datetime"]
-    req_data_df["end_datetime"] = req_data["end_datetime"]
+    existing_data_dict = {record["mtrSrlNo"]: record for record in existing_data_list}
 
-    df = df.join(req_data_df.set_index("switch_addresses"), on="mtrSrlNo")
-    # df['start_datetime'] = pd.to_datetime(df['start_datetime'])
-    # df = df.loc[df.groupby('site')['start_datetime'].idxmax()]
-    # df['start_datetime'] = str(pd.to_datetime(df['start_datetime']))
+    request_data = {}
+    grouped_data = {}
 
-    grouped_df = (
-        df.groupby(
-            [
-                "group_id",
-                "status",
-                "start_datetime",
-                "end_datetime",
-                "overrdValue",
-                "original_start_datetime",
-                "rqstStrtDt",
-                "rqstEndDt",
-            ]
-        )
-        .agg({"mtrSrlNo": list, "site": list, "correlation_id": list, "crrltnId": list})
-        .reset_index()
-        .rename(columns={"mtrSrlNo": "switch_addresses"})
-    )
+    for req_record in req_data_list:
+        switch_addresses = req_record.get("switch_addresses")
+        existing_record = existing_data_dict.get(switch_addresses)
 
-    grouped_df["site_switch_crl_id"] = grouped_df.apply(
-        lambda row: [
-            {"site": s, "switch_addresses": sa, "correlation_id": c, "crrltnId": cl}
-            for s, sa, c, cl in zip(
-                row["site"],
-                row["switch_addresses"],
-                row["correlation_id"],
-                row["crrltnId"],
+        if existing_record:
+            key = (
+                req_data.get("group_id"),
+                req_data.get("status"),
+                existing_record.get("overrdValue"),
+                existing_record.get("original_start_datetime"),
+                existing_record.get("rqstStrtDt"),
             )
-        ],
-        axis=1,
-    )
-    logger.info("Sub grouped data : %s", grouped_df.to_dict(orient="records"))
-    return grouped_df.to_dict(orient="records")
+            if key not in grouped_data:
+                grouped_data[key] = {
+                    "group_id": req_data.get("group_id"),
+                    "status": req_data.get("status"),
+                    "start_datetime": req_data.get("start_datetime"),
+                    "end_datetime": req_data.get("end_datetime"),
+                    "overrdValue": existing_record.get("overrdValue"),
+                    "original_start_datetime": existing_record.get(
+                        "original_start_datetime"
+                    ),
+                    "rqstStrtDt": existing_record.get("rqstStrtDt"),
+                    "rqstEndDt": existing_record.get("rqstEndDt"),
+                    "site": [req_record.get("site")],
+                    "switch_addresses": [req_record.get("switch_addresses")],
+                    "correlation_id": [req_record.get("correlation_id")],
+                    "crrltnId": [existing_record.get("crrltnId")],
+                    "site_switch_crl_id": [
+                        {
+                            "site": req_record.get("site"),
+                            "correlation_id": req_record.get("correlation_id"),
+                            "switch_addresses": req_record.get("switch_addresses"),
+                            "crrltnId": existing_record.get("crrltnId"),
+                        }
+                    ],
+                }
+
+            else:
+                site = req_record.get("site")
+                correlation_id = req_record.get("correlation_id")
+                switch_addresses = req_record.get("switch_addresses")
+                crrltn_id = existing_record.get("crrltnId")
+                grouped_data[key]["site"].append(site)
+                grouped_data[key]["switch_addresses"].append(switch_addresses)
+                grouped_data[key]["correlation_id"].append(correlation_id)
+                grouped_data[key]["crrltnId"].append(crrltn_id)
+                grouped_data[key]["site_switch_crl_id"].append(
+                    {
+                        "site": site,
+                        "correlation_id": correlation_id,
+                        "switch_addresses": switch_addresses,
+                        "crrltnId": crrltn_id,
+                    }
+                )
+        else:
+            site = req_record.get("site")
+            correlation_id = req_record.get("correlation_id")
+            switch_addresses = req_record.get("switch_addresses")
+            request_data["group_id"] = req_data.get("group_id")
+            request_data["status"] = req_data.get("status")
+            request_data["start_datetime"] = req_data.get("start_datetime")
+            request_data["end_datetime"] = req_data.get("end_datetime")
+            request_data["site"].append(site)
+            request_data["switch_addresses"].append(switch_addresses)
+            request_data["correlation_id"].append(correlation_id)
+            request_data["site_switch_crl_id"].append(
+                {
+                    "site": site,
+                    "correlation_id": correlation_id,
+                    "switch_addresses": switch_addresses,
+                }
+            )
+
+    return request_data, list(grouped_data.values())
 
 
 def new_get_contiguous_request(request: dict):
@@ -678,9 +714,6 @@ def new_get_contiguous_request(request: dict):
     2. The terminal (first or last) request in the chain.
     """
     ddb_table: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
-
-    # contiguous_request: Optional[dict] = None
-    # terminal_request: Optional[dict] = None
 
     site: str = request["site"]
     start_datetime: str = request["start_datetime"]
@@ -760,27 +793,9 @@ def new_get_contiguous_request(request: dict):
         else:
             break
 
-    contiguous_sw_addresses = list(map(lambda x: x["mtrSrlNo"], items))
-    # contiguous_requests = {}
-    # def create_contiguous_requests(item):
-    #     original_start_datetime = item[0][0]
-    #     overrd_value = item[0][1]
-    #     item[1]
-    #     if original_start_datetime + overrd_value not in contiguous_requests:
-    #         contiguous_requests[original_start_datetime-overrd_value] = {
-    #             "original_start_datetime": original_start_datetime,
-    #             "group_id": request["group_id"],
-    #             "State": overrd_value,
-    #             "start_datetime": request["start_datetime"],
-    #             "end_datetime": request["end_datetime"],
-    #             "site": [item["site"]],
-    #             "switch_address": [item["mtrSrlNo"]],
-    #             "correlation_id": [item["crrltnId"]],
-    #             }
-    # grouped_stream_item = stream_item.groupBy(lambda x: (x['original_start_datetime'], x['overrdValue'])).map(create_contiguous_requests)
     if not items:
         logger.info("No contiguous requests found")
-        return []
+        return request, []
     if "site_switch_crl_id" not in request:
         contiguous_request = items[0]
         contiguous_request.update(
@@ -792,47 +807,11 @@ def new_get_contiguous_request(request: dict):
                 "switch_addresses": request["switch_addresses"],
             }
         )
-        return [contiguous_request]
-    contiguous_requests = group_contiguous_requests(items, request)
-    site_switch_crl_id_df = pd.DataFrame(request["site_switch_crl_id"])
-    site_switch_crl_id_df = site_switch_crl_id_df[
-        ~site_switch_crl_id_df["switch_addresses"].isin(contiguous_sw_addresses)
-    ]
-    request.update(
-        {
-            "site": site_switch_crl_id_df["site"].tolist(),
-            "switch_addresses": site_switch_crl_id_df["switch_addresses"].tolist(),
-            "correlation_id": site_switch_crl_id_df["correlation_id"].tolist(),
-            "site_switch_crl_id": site_switch_crl_id_df.to_dict(orient="records"),
-        }
-    )
-    # if not contiguous_requests:
-    #     logger.info("No contiguous requests found")
-    # if items:
-    #     if len(items) == 1:
-    #         contiguous_request = items[0]
-    #
-    #         logger.info("Contiguous request %s found", contiguous_request['crrltnId'])
-    #
-    #         # If the contiguous request is of the opposite switch direction, then we don't need to get the terminal
-    #         # request.
-    #         if request['status'] != contiguous_request['overrdValue']:
-    #             logger.info("Contiguous request is of the opposite switch direction")
-    #             terminal_request = contiguous_request
-    #             return contiguous_request, terminal_request
-    #
-    #         logger.info("Identifying terminal request")
-    #         # todo: need to add original_start_datetime and need to update in each extension
-    #         terminal_request: dict = get_terminal_request(contiguous_request)
-    #     else:
-    #         message: str = f"More than one contiguous Load Control request found for site {site}, " \
-    #                        f"meter {switch_addresses}, start {start_datetime}"
-    #
-    #         raise RuntimeError(message)
-    # else:
-    #     logger.info("No contiguous requests found")
-    # return contiguous_request, terminal_request
-    return contiguous_requests
+        return [], [contiguous_request]
+    request, contiguous_requests = group_contiguous_requests(items, request)
+    logger.info("Group Contiguous requests: %s", contiguous_requests)
+    logger.info("Non Contiguous requests: %s", request)
+    return request, contiguous_requests
 
 
 if __name__ == "__main__":

@@ -24,8 +24,7 @@
               "Type": "Map",
               "ItemProcessor": {
                 "ProcessorConfig": {
-                  "Mode": "DISTRIBUTED",
-                  "ExecutionType": "EXPRESS"
+                  "Mode": "INLINE"
                 },
                 "StartAt": "Create LC Override Policy",
                 "States": {
@@ -122,7 +121,7 @@
               "End": true,
               "InputPath": "$.Payload",
               "Label": "Map",
-              "MaxConcurrency": 100,
+              "MaxConcurrency": 0,
               "ToleratedFailurePercentage": 100
             }
           }

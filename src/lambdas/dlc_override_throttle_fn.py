@@ -14,7 +14,7 @@ from botocore.client import BaseClient
 from src.config.config import AppConfig
 from aws_lambda_powertools import Tracer
 import ast
-import pandas as pd
+
 
 # from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
 from aws_lambda_powertools.utilities.batch import (
@@ -332,41 +332,70 @@ def group_records(event):
     """
     data = [ast.literal_eval(i["body"]) for i in event["Records"]]
 
-    df = pd.DataFrame(data)
-    if "group_id" not in df:
-        df["group_id"] = None
-    try:
-        nan_df = df[pd.isna(df["group_id"])]
-        if not nan_df.empty:
-            nan_df = df[df.group_id.isna()]
-            df = df.drop(nan_df.index)
-            nan_df = nan_df.where(pd.notnull(nan_df), None)
-            nan_df = nan_df.to_dict(orient="records")
+    # Create a list to store records with missing group_id
+    nan_records = []
+
+    # Create a dictionary to store grouped records
+    grouped_records = {}
+
+    for record in data:
+        group_id = record.get("group_id")
+
+        if group_id is None:
+            # Handle records with missing group_id
+            nan_records.append(
+                {
+                    "group_id": None,
+                    "status": record.get("status"),
+                    "start_datetime": record.get("start_datetime"),
+                    "end_datetime": record.get("end_datetime"),
+                    "switch_addresses": record.get("switch_addresses", []),
+                    "site": record.get("site", []),
+                    "correlation_id": record.get("correlation_id", []),
+                }
+            )
         else:
-            nan_df = []
-    except Exception as e:
-        print("error", str(e))
-    if not df.empty:
-        grouped_df = (
-            df.groupby(["group_id", "status", "start_datetime", "end_datetime"])
-            .agg({"switch_addresses": list, "site": list, "correlation_id": list})
-            .reset_index()
-        )
+            # Group records by group_id
+            key = (
+                group_id,
+                record.get("status"),
+                record.get("start_datetime"),
+                record.get("end_datetime"),
+            )
 
-        grouped_df["site_switch_crl_id"] = grouped_df.apply(
-            lambda row: [
-                {"site": s, "switch_addresses": sa, "correlation_id": c}
-                for s, sa, c in zip(
-                    row["site"], row["switch_addresses"], row["correlation_id"]
-                )
-            ],
-            axis=1,
-        )
-        grouped_df = grouped_df.to_dict(orient="records")
-    else:
-        grouped_df = []
+            if key not in grouped_records:
+                grouped_records[key] = {
+                    "group_id": group_id,
+                    "status": record.get("status"),
+                    "start_datetime": record.get("start_datetime"),
+                    "end_datetime": record.get("end_datetime"),
+                    "switch_addresses": [],
+                    "site": [],
+                    "correlation_id": [],
+                    "site_switch_crl_id": [],
+                }
 
-    return grouped_df + nan_df
+            # Append values to the grouped records
+            switch_addresses = record.get("switch_addresses")
+            site = record.get("site")
+            correlation_id = record.get("correlation_id")
+            grouped_records[key]["switch_addresses"].append(
+                record.get("switch_addresses")
+            )
+            grouped_records[key]["site"].append(record.get("site"))
+            grouped_records[key]["correlation_id"].append(record.get("correlation_id"))
+            grouped_records[key]["site_switch_crl_id"].append(
+                {
+                    "site": site,
+                    "switch_addresses": switch_addresses,
+                    "correlation_id": correlation_id,
+                }
+            )
+
+    # Convert grouped_records dictionary to a list
+    grouped_records_list = list(grouped_records.values())
+
+    return grouped_records_list + nan_records
 
 
 # @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
