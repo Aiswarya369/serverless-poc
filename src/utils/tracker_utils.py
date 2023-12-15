@@ -617,8 +617,18 @@ def group_contiguous_requests(existing_data, req_data):
 
     existing_data_dict = {record["mtrSrlNo"]: record for record in existing_data_list}
 
-    request_data = {}
+    request_data = {
+        "group_id": req_data.get("group_id"),
+        "status": req_data.get("status"),
+        "start_datetime": req_data.get("start_datetime"),
+        "end_datetime": req_data.get("end_datetime"),
+        "site": [],
+        "switch_addresses": [],
+        "correlation_id": [],
+        "site_switch_crl_id": [],
+    }
     grouped_data = {}
+    isContiguous = False
 
     for req_record in req_data_list:
         switch_addresses = req_record.get("switch_addresses")
@@ -676,13 +686,10 @@ def group_contiguous_requests(existing_data, req_data):
                     }
                 )
         else:
+            isContiguous = True
             site = req_record.get("site")
             correlation_id = req_record.get("correlation_id")
             switch_addresses = req_record.get("switch_addresses")
-            request_data["group_id"] = req_data.get("group_id")
-            request_data["status"] = req_data.get("status")
-            request_data["start_datetime"] = req_data.get("start_datetime")
-            request_data["end_datetime"] = req_data.get("end_datetime")
             request_data["site"].append(site)
             request_data["switch_addresses"].append(switch_addresses)
             request_data["correlation_id"].append(correlation_id)
@@ -694,7 +701,7 @@ def group_contiguous_requests(existing_data, req_data):
                 }
             )
 
-    return request_data, list(grouped_data.values())
+    return request_data if isContiguous else None, list(grouped_data.values())
 
 
 def new_get_contiguous_request(request: dict):

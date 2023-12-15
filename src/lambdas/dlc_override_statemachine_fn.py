@@ -563,7 +563,7 @@ def handle_contiguous_records(request: dict):
     responses = []
 
     # Get request(s) that are previously contiguous to this one.
-    request, contiguous_requests = new_get_contiguous_request(request)
+    non_contiguous_requests, contiguous_requests = new_get_contiguous_request(request)
 
     for contiguous_request in contiguous_requests:
         response["action"] = "createDLCPolicy"
@@ -577,7 +577,7 @@ def handle_contiguous_records(request: dict):
         response["request"] = contiguous_request
         responses.append(response)
 
-    if request:
+    if non_contiguous_requests:
         # No contiguous request - create a new stand-alone policy and deploy straight away.
         response["request"] = request
         response["action"] = "createDLCPolicy"

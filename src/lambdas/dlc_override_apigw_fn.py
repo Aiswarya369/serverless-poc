@@ -217,6 +217,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         request_site=site,
         serial_no=meter_serial_number,
         override=override_status,
+        original_start_datetime=request["start_datetime"],
     )
 
     # Validate the subscription.
