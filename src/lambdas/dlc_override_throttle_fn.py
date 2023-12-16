@@ -14,9 +14,8 @@ from botocore.client import BaseClient
 from src.config.config import AppConfig
 from aws_lambda_powertools import Tracer
 import ast
+from src.support import SupportMessage, send_message_to_support, alert_on_exception
 
-
-# from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
 from aws_lambda_powertools.utilities.batch import (
     BatchProcessor,
     process_partial_response,
@@ -27,10 +26,15 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from src.lambdas.dlc_event_helper import assemble_event_payload
 from src.statemachine.state_machine_handler import StateMachineHandler
 from src.utils.kinesis_utils import deliver_to_kinesis
-from src.utils.tracker_utils import update_tracker, is_request_pending_state_machine
+from src.utils.tracker_utils import (
+    update_tracker,
+    is_request_pending_state_machine,
+    bulk_update_records,
+)
+
 
 # Environmental variables
-# KINESIS_DATA_STREAM_NAME: str = os.environ.get("KINESIS_DATA_STREAM_NAME")
+KINESIS_DATA_STREAM_NAME: str = os.environ.get("KINESIS_DATA_STREAM_NAME")
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", logging.INFO)
 REGION: str = os.environ.get("REGION", "ap-south-1")
 REQUEST_TRACKER_TABLE_NAME: str = os.environ.get("REQUEST_TRACKER_TABLE_NAME")
@@ -98,7 +102,36 @@ def report_error_to_client(
         request_start_date=request_start_date,
         request_end_date=request_end_date,
     )
-    # payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
+    # payload = assemble_event_payload(
+    #     correlation_id, Stage.DECLINED, error_datetime, message
+    # )
+    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
+def new_report_error_to_client(records, message):
+    """
+    Updated the request tracker with a failure status and reports the failure to the client via the Kinesis stream.
+
+    :param correlation_id: The request correlation_id.
+    :param message: The error message for the failure.
+    :param request_start_date: An optional start date for the request.
+    :param request_end_date: An optional end date for the request.
+    """
+    error_datetime = datetime.now(timezone.utc)
+    if "site_switch_crl_id" in records:
+        bulk_update_records(records, Stage.DECLINED, error_datetime, message=message)
+        return
+    update_tracker(
+        correlation_id=records["correlation_id"],
+        stage=Stage.DECLINED,
+        event_datetime=error_datetime,
+        message=message,
+        request_start_date=records["request_start_date"],
+        request_end_date=records["request_end_date"],
+    )
+    # payload = assemble_event_payload(
+    #     records["correlation_id"], Stage.DECLINED, error_datetime, message
+    # )
     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
@@ -110,63 +143,11 @@ def report_error_to_support(correlation_id: str, reason: str, subject_hint: str 
     :param reason: The reason why it failed.
     :param subject_hint: The subject hint that will appear in OpsGenie.
     """
-    # subject = LOAD_CONTROL_ALERT_FORMAT.format(hint=subject_hint)
-    # support_message = SupportMessage(reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS)
-    # send_message_to_support(support_message, correlation_id=correlation_id)
-
-
-def reject_request(
-    correlation_id,
-    message: str,
-    request_start_date: Optional[datetime] = None,
-    request_end_date: Optional[datetime] = None,
-):
-    if correlation_id and (not isinstance(correlation_id, str)):
-        partial_report_error_to_client = partial(
-            report_error_to_client,
-            message=message,
-            request_start_date=request_start_date,
-            request_end_date=request_end_date,
-        )
-        list(map(partial_report_error_to_client, correlation_id))
-    else:
-        report_error_to_client(
-            correlation_id,
-            message=message,
-            request_start_date=request_start_date,
-            request_end_date=request_end_date,
-        )
-
-
-def report_error(correlation_id, reason, subject_hint=None):
-    if not isinstance(correlation_id, str):
-        partial_report_error_to_support = partial(
-            report_error_to_support, reason=reason, subject_hint=subject_hint
-        )
-        list(map(partial_report_error_to_support, correlation_id))
-    else:
-        report_error_to_support(
-            correlation_id=correlation_id, reason=reason, subject_hint=subject_hint
-        )
-
-
-def update_status(response, start, end, correlation_id):
-    start_date: datetime = response["startDate"]
-    logger.info(
-        "SM invoked for DLC request. ARN: %s, StartDateTime: %s",
-        response["executionArn"],
-        start_date,
+    subject = LOAD_CONTROL_ALERT_FORMAT.format(hint=subject_hint)
+    support_message = SupportMessage(
+        reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS
     )
-    update_tracker(
-        correlation_id=correlation_id,
-        stage=Stage.QUEUED,
-        event_datetime=start_date,
-        request_start_date=start,
-        request_end_date=end,
-    )
-    # payload = assemble_event_payload(correlation_id, Stage.QUEUED,
-    #                                  start_date)
-    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    send_message_to_support(support_message, correlation_id=correlation_id)
 
 
 def update_start_end_times_on_request(
@@ -193,9 +174,60 @@ def update_start_end_times_on_request(
     return start, end
 
 
-def initiate_step_function(
-    correlation_id: str, start: datetime, end: datetime, request: Dict[str, Any]
-):
+def report_error(correlation_id, reason, subject_hint=None):
+    if isinstance(correlation_id, list):
+        partial_report_error_to_support = partial(
+            report_error_to_support, reason=reason, subject_hint=subject_hint
+        )
+        list(map(partial_report_error_to_support, correlation_id))
+    else:
+        report_error_to_support(
+            correlation_id=correlation_id, reason=reason, subject_hint=subject_hint
+        )
+
+
+def update_status(response, start, end, correlation_id):
+    start_date: datetime = response["startDate"]
+    logger.info(
+        "SM invoked for DLC request. ARN: %s, StartDateTime: %s",
+        response["executionArn"],
+        start_date,
+    )
+    update_tracker(
+        correlation_id=correlation_id,
+        stage=Stage.QUEUED,
+        event_datetime=start_date,
+        request_start_date=start,
+        request_end_date=end,
+    )
+    # payload = assemble_event_payload(correlation_id, Stage.QUEUED, start_date)
+    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
+def new_update_status(response, request):
+    start_date: datetime = response["startDate"]
+    logger.info(
+        "SM invoked for DLC request. ARN: %s, StartDateTime: %s",
+        response["executionArn"],
+        start_date,
+    )
+    if "site_switch_crl_id" in request:
+        bulk_update_records(request, Stage.DECLINED, start_date)
+        return
+    update_tracker(
+        correlation_id=request["correlation_id"],
+        stage=Stage.QUEUED,
+        event_datetime=start_date,
+        request_start_date=request["start"],
+        request_end_date=request["end"],
+    )
+    # payload = assemble_event_payload(
+    #     request["correlation_id"], Stage.QUEUED, start_date
+    # )
+    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
+def initiate_step_function(correlation_id: str, records: Dict[str, Any]):
     """
     Initiates the step function that will process override DLC request.
 
@@ -211,31 +243,21 @@ def initiate_step_function(
             step_function_client, AppConfig.DLC_OVERRIDE_SM_ARN
         )
         step_function_id = correlation_id
-        if not isinstance(correlation_id, str):
+        if isinstance(correlation_id, list):
             step_function_id = "GRP-" + correlation_id[0]
-
         response = sm_handler.initiate(
-            step_function_id, json.dumps(request, cls=JSONEncoder)
+            step_function_id,
+            json.dumps(
+                {"action": "groupLCRequests", "request": records}, cls=JSONEncoder
+            ),
         )
         status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
-
         if status_code == HTTPStatus.OK:
-            if not isinstance(correlation_id, str):
-                partial_update_status = partial(update_status, response, start, end)
-                list(map(partial_update_status, correlation_id))
-                return
-            update_status(response, start, end, correlation_id)
-            # payload = assemble_event_payload(correlation_id, Stage.QUEUED, start_date)
-            # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+            new_update_status(response, records)
             return
 
         error_message = f"Launching DLC request resulted in {status_code} status code"
-        reject_request(
-            correlation_id=correlation_id,
-            message=error_message,
-            request_start_date=start,
-            request_end_date=end,
-        )
+        new_report_error_to_client(records, message=error_message)
         report_error(
             correlation_id=correlation_id,
             reason="DLC request failed",
@@ -252,7 +274,7 @@ def initiate_step_function(
             repr(e),
             exc_info=e,
         )
-        reject_request(correlation_id=correlation_id, message=str(e))
+        new_report_error_to_client(records, message=str(e))
         report_error(
             correlation_id=correlation_id,
             reason="DLC Request failed with internal error",
@@ -271,7 +293,7 @@ def remove_processed_records(obj):
 
 
 @RateLimiter(max_calls=RATE_LIMIT_CALLS, period=RATE_LIMIT_PERIOD_SEC)
-def record_handler(record: SQSRecord):
+def record_handler(records):
     """
     Process a single SQS record. This function is also rate limited.
     The `@RateLimiter` is used to rate limit events that contain more records than the rate limit. In which case it
@@ -282,80 +304,52 @@ def record_handler(record: SQSRecord):
 
     :param record: The SQS record.
     """
-    # request = record.json_body
-    # correlation_id = request["correlation_id"]
-    # if not is_request_pending_state_machine(correlation_id): # todo : remove unwanted records
-    #     logger.info("Request with matching correlation id: %s, has already been processed.", correlation_id)
-    #     return
+
     logger.info("Inside Record Handler")
-    logger.info(record)
-    if not isinstance(record["correlation_id"], str):
+    logger.info(records)
+    if isinstance(records["correlation_id"], list):
         (
-            record["site_switch_crl_id"],
-            record["site"],
-            record["switch_addresses"],
-            record["correlation_id"],
-        ) = zip(*map(remove_processed_records, record["site_switch_crl_id"]))
+            records["site_switch_crl_id"],
+            records["site"],
+            records["switch_address"],
+            records["correlation_id"],
+        ) = zip(*map(remove_processed_records, records["site_switch_crl_id"]))
 
-    correlation_id = record["correlation_id"]
+    site_switch_crl_id = records["site_switch_crl_id"]
 
-    request_start, request_end = update_start_end_times_on_request(record)
-    if not correlation_id:
-        reject_request([], message="No Valid correlation_id")
+    request_start, request_end = update_start_end_times_on_request(records)
+
+    if not site_switch_crl_id:
+        return
     if request_end <= datetime.now(tz=timezone.utc):
-        # logger.error("Request with correlation_id '%s', has been throttled for too long", correlation_id) # todo
-        reject_request(
-            correlation_id,
-            message="Request is rejected as it has a end datetime in the past",
+        logger.error(
+            "Request with correlation_id '%s', has been throttled for too long",
+            str(records["correlation_id"]),
+        )
+        new_report_error_to_client(
+            records, message="Request is rejected as it has a end datetime in the past"
         )
         return
 
-    request = {}
-    request["action"] = "groupLCRequests"
-    request["request"] = record
-
-    # logger.info("Starting to process DLC request with correlation_id: %s", correlation_id)
-    initiate_step_function(
-        correlation_id=correlation_id,
-        start=request_start,
-        end=request_end,
-        request=request,
+    logger.info(
+        "Starting to process DLC request with correlation_id: %s",
+        str(records["correlation_id"]),
     )
+    initiate_step_function(correlation_id=records["correlation_id"], records=records)
 
 
 def group_records(event):
-    """
-    Process records in event and get the all 'body'.
-    Split the records that not have the group_id in 'body'.
-    Group records that have group_id and add new field 'site_and_switch'.
-    Finally, merge the both records and return.
-    """
     data = [ast.literal_eval(i["body"]) for i in event["Records"]]
-
-    # Create a list to store records with missing group_id
     nan_records = []
 
-    # Create a dictionary to store grouped records
     grouped_records = {}
 
     for record in data:
         group_id = record.get("group_id")
 
         if group_id is None:
-            # Handle records with missing group_id
-            nan_records.append(
-                {
-                    "group_id": None,
-                    "status": record.get("status"),
-                    "start_datetime": record.get("start_datetime"),
-                    "end_datetime": record.get("end_datetime"),
-                    "switch_addresses": record.get("switch_addresses", []),
-                    "site": record.get("site", []),
-                    "correlation_id": record.get("correlation_id", []),
-                }
-            )
+            nan_records.append(record)
         else:
-            # Group records by group_id
             key = (
                 group_id,
                 record.get("status"),
@@ -375,7 +369,6 @@ def group_records(event):
                     "site_switch_crl_id": [],
                 }
 
-            # Append values to the grouped records
             switch_addresses = record.get("switch_addresses")
             site = record.get("site")
             correlation_id = record.get("correlation_id")
@@ -392,29 +385,27 @@ def group_records(event):
                 }
             )
 
-    # Convert grouped_records dictionary to a list
     grouped_records_list = list(grouped_records.values())
 
     return grouped_records_list + nan_records
 
 
-# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+# @alert_on_exception(
+#     tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
+# )
 # @tracer.capture_lambda_handler
 def lambda_handler(event: Dict[str, Any], context: LambdaContext):
+    """
+    Expecting event contain list of record and max number of records is 1000
+    """
     """
     The lambda entry point.
 
     :param event: The raw event.
     :param context: The lambda context.
     """
-
     try:
-        logger.info("Events from SQS: %s", event)
-
         start_time = time.time()
-        start_time = time.time()
-        # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
-        #                                   context=context)
         result = list(map(record_handler, group_records(event)))
         end_time = time.time()
 

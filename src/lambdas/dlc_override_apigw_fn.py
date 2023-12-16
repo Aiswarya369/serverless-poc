@@ -1,6 +1,5 @@
 import datetime
 import json
-
 import logging
 import os
 import uuid
@@ -14,12 +13,16 @@ from typing import Union, Dict, Any, List
 from aws_lambda_powertools import Tracer
 from botocore.client import BaseClient
 from src.model.enums import Stage
-
-# from cresconet_aws.support import alert_on_exception
+from src.support import (
+    send_message_to_support,
+    SupportMessage,
+    alert_on_exception,
+)
 from src.utils.aws_utils import send_sqs_message
 from src.config.config import AppConfig
-from src.lambdas.dlc_event_helper import assemble_error_message, assemble_event_payload
-from src.utils.kinesis_utils import deliver_to_kinesis
+
+# from src.lambdas.dlc_event_helper import assemble_error_message, assemble_event_payload
+# from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.request_validator import RequestValidator, ValidationError
 from src.utils.tracker_utils import create_tracker, update_tracker
 
@@ -32,7 +35,9 @@ logger.setLevel(os.environ.get("LOG_LEVEL", logging.INFO))
 
 # Environmental variables.
 REGION: str = os.environ.get("REGION", "ap-south-1")
-# KINESIS_DATA_STREAM_NAME: str = os.environ.get("KINESIS_DATA_STREAM_NAME", "msi-dev-subscriptions-kds")
+KINESIS_DATA_STREAM_NAME: str = os.environ.get(
+    "KINESIS_DATA_STREAM_NAME", "msi-dev-subscriptions-kds"
+)
 DEFAULT_OVERRIDE_DURATION_MINUTES: int = int(
     os.environ.get("DEFAULT_OVERRIDE_DURATION_MINUTES", 30)
 )
@@ -99,9 +104,11 @@ def add_request_on_throttle_queue(
 
         error_message = f"Sending DLC request to throttling queue resulted in {status_code} status code"
         report_errors(correlation_id, datetime.now(tz=timezone.utc), error_message)
-        # subject = LOAD_CONTROL_ALERT_FORMAT.format(hint="Failed Request")
-        # support_message = SupportMessage(reason=error_message, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS)
-        # send_message_to_support(support_message, correlation_id=correlation_id)
+        subject = LOAD_CONTROL_ALERT_FORMAT.format(hint="Failed Request")
+        support_message = SupportMessage(
+            reason=error_message, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS
+        )
+        send_message_to_support(support_message, correlation_id=correlation_id)
         return format_response(
             HTTPStatus.INTERNAL_SERVER_ERROR,
             {
@@ -111,15 +118,16 @@ def add_request_on_throttle_queue(
             },
         )
     except Exception as e:
-        # logger.exception("Exception while attempting to place request on throttle queue. %s", repr(e))
         logger.exception(
             "Exception while attempting to place request on throttle queue. %s", repr(e)
         )
         reason = "DLC Request failed with internal error"
         report_errors(correlation_id, datetime.now(tz=timezone.utc), str(e))
-        # subject = LOAD_CONTROL_ALERT_FORMAT.format(hint="Internal Error")
-        # support_message = SupportMessage(reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS)
-        # send_message_to_support(support_message, correlation_id=correlation_id)
+        subject = LOAD_CONTROL_ALERT_FORMAT.format(hint="Internal Error")
+        support_message = SupportMessage(
+            reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS
+        )
+        send_message_to_support(support_message, correlation_id=correlation_id)
         return format_response(
             HTTPStatus.INTERNAL_SERVER_ERROR,
             {"message": reason, "correlation_id": correlation_id, "error": str(e)},
@@ -139,8 +147,8 @@ def report_errors(
     :param error_message: A list of validation errors to report or a single error message.
     """
     message = error_message
-    if isinstance(error_message, list):
-        message = assemble_error_message(error_message)
+    # if isinstance(error_message, list):
+    #     message = assemble_error_message(error_message)
 
     # Update request tracker.
     update_tracker(
@@ -151,7 +159,9 @@ def report_errors(
     )
 
     # Create event and send to Kinesis.
-    # payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
+    # payload = assemble_event_payload(
+    #     correlation_id, Stage.DECLINED, error_datetime, message
+    # )
     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
@@ -169,6 +179,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     # Get stuff from incoming request.
     request: dict = json.loads(event["body"])
     subscription_id: str = event["pathParameters"]["subscription_id"]  # Always exists.
+    request["sub_id"]: str = subscription_id
 
     # Validate the request.
     errors = RequestValidator.validate_dlc_override_request(
@@ -199,12 +210,10 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     override_status: str = request["status"]
 
     # There should only be one meter serial supplied in "switch_addresses", as per validation.
-
     switch_addresses: Union[str, List[str]] = request["switch_addresses"]
-    meter_serial_number: str = (
+    request["switch_addresses"] = (
         switch_addresses[0] if type(switch_addresses) == list else switch_addresses
     )
-    request["switch_addresses"] = meter_serial_number
 
     # Create initial request tracker records.
     # We can't add the request start and end dates to the tracker header record here because we need to validate
@@ -215,9 +224,10 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         correlation_id=correlation_id,
         sub_id=subscription_id,
         request_site=site,
-        serial_no=meter_serial_number,
+        serial_no=request["switch_addresses"],
         override=override_status,
-        original_start_datetime=request["start_datetime"],
+        # request_start_date=request["start_datetime"],
+        # request_end_date=request["end_datetime"],
     )
 
     # Validate the subscription.
@@ -243,7 +253,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         request, DEFAULT_OVERRIDE_DURATION_MINUTES
     )
     if duration_errors:
-        # logger.debug("Duration errors: %s", duration_errors)
+        logger.debug("Duration errors: %s", duration_errors)
         report_errors(correlation_id, now, duration_errors)
         error_details = {
             "correlation_id": correlation_id,
@@ -272,7 +282,9 @@ def create_correlation_id(site: str, now: datetime) -> str:
     return correlation_id
 
 
-# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+# @alert_on_exception(
+#     tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
+# )
 # @tracer.capture_lambda_handler
 def lambda_handler(event: Dict[str, Any], _context: Any):
     """
@@ -283,11 +295,14 @@ def lambda_handler(event: Dict[str, Any], _context: Any):
     :returns: A http response.
     """
     try:
-        logger.info("Lambda to perform direct Load Control API override being run now")
-        logger.info(f"Event: %s", str(event))
+        logger.info(
+            "Lambda to perform direct Load Control API override being run now : %s",
+            str(event),
+        )
+
         return job_entry(event)
     except Exception as e:
-        logger.exception(
+        logger.info(
             "Failed to process DLC request event. Event: %s, Error: %s",
             str(event),
             repr(e),

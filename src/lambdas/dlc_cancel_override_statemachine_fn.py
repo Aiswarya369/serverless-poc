@@ -15,7 +15,7 @@ import uuid
 # from msi_policynet_client import PolicyNetClient
 
 from src.config.config import AppConfig
-from src.lambdas.dlc_event_helper import assemble_event_payload
+# from src.lambdas.dlc_event_helper import assemble_event_payload
 from src.model.sm_actions import SupportedCancelOverrideSMActions
 from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.tracker_utils import (

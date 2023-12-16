@@ -9,6 +9,10 @@ from boto3.dynamodb.conditions import Key, Attr
 from botocore.client import BaseClient
 from src.model.enums import Stage, HeadEnd
 
+# from src.lambdas.dlc_event_helper import assemble_event_payload
+# from src.utils.kinesis_utils import deliver_to_kinesis
+
+KINESIS_DATA_STREAM_NAME: str = os.environ.get("KINESIS_DATA_STREAM_NAME")
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -73,6 +77,7 @@ def create_tracker(
         sub_id,
         request_site,
     )
+
     now: datetime = datetime.now(timezone.utc)
 
     header_item: dict = {
@@ -100,10 +105,8 @@ def create_tracker(
     if request_start_date:
         start: str = request_start_date.isoformat(timespec="seconds")
         header_item["rqstStrtDt"] = start
-
     if original_start_datetime:
         header_item["original_start_datetime"] = original_start_datetime
-
     if request_end_date:
         header_item["rqstEndDt"] = request_end_date.isoformat(timespec="seconds")
 
@@ -176,7 +179,7 @@ def update_header_record(
     :param extends: correlation id of the request that this request extends
     :return:
     """
-    # logger.debug("Updating tracker record for correlation id %s", correlation_id)
+    logger.debug("Updating tracker record for correlation id %s", correlation_id)
 
     pk: str = f"{PK_PREFIX}{correlation_id}"
     sk: str = f"{SK_REQUEST_PREFIX}{correlation_id}"
@@ -275,7 +278,6 @@ def update_tracker(
     request_end_date: datetime = None,
     extended_by: str = None,
     extends: str = None,
-    original_start_datetime=None,
 ):
     """
     Update tracker records.
@@ -291,7 +293,7 @@ def update_tracker(
     :param extended_by: correlation id of the request that this request is extended by
     :param extends: correlation id of the request that this request extends
     """
-    # logger.debug("Update tracker: correlation id %s", correlation_id)
+    logger.debug("Update tracker: correlation id %s", correlation_id)
 
     # Get header record.
     header_record = get_header_record(correlation_id)
@@ -320,7 +322,6 @@ def update_tracker(
         request_end_date=request_end_date,
         extended_by=extended_by,
         extends=extends,
-        original_start_datetime=original_start_datetime,
     )
 
     # Add detail record.
@@ -340,6 +341,158 @@ def update_tracker(
         policy_name=policy_name,
         extended_by=extended_by,
         extends=extends,
+    )
+
+
+def bulk_update_header_records(
+    data,
+    stage: Stage,
+    event_datetime: datetime,
+    policy_id: int = None,
+    policy_name: str = None,
+    original_start_datetime=None,
+):
+    pk = []
+    sk = []
+    no_stages = {}
+    for site_switch_crl_id in data["site_switch_crl_id"]:
+        correlation_id = site_switch_crl_id["correlation_id"]
+        pk.append(f"{PK_PREFIX}{correlation_id}")
+        sk.append(f"{SK_REQUEST_PREFIX}{correlation_id}")
+    table: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
+    items = []
+    for i in range(int(len(data["site_switch_crl_id"]) / 100)):
+        last_evaluated_key = False
+        while True:
+            if last_evaluated_key:
+                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
+                # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
+                response: dict = table.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 99])
+                    & Attr("SK").is_in(pk[i * 100 : i * 100 + 99]),
+                    ExclusiveStartKey=last_evaluated_key,
+                )
+            else:
+                # This only runs the first time - provide no ExclusiveStartKey initially.
+                response: dict = table.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 99])
+                    & Attr("SK").is_in(pk[i * 100 : i * 100 + 99])
+                )
+            # Append retrieved records to our result set.
+            items.extend(response["Items"])
+            if "LastEvaluatedKey" in response:
+                last_evaluated_key = response["LastEvaluatedKey"]
+                # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
+            else:
+                break
+
+    with table.batch_writer() as batch:
+        for item in items:
+            no_stages[item["PK"]] = int(item["stg"] + 1)
+            item.update(
+                {
+                    "currentStg": stage.value,
+                    "noStages": int(item["stg"] + 1),
+                    "updateDt": event_datetime.isoformat(),
+                }
+            )
+
+            if policy_id:
+                item.update(
+                    {
+                        "plcyId": policy_id,
+                        "GSI4PK": f"{GSI4PK_PREFIX}{HeadEnd.POLICYNET}",
+                        "GSI4SK": f"{GSI4SK_PREFIX}{policy_id}",
+                        "plcyName": policy_name,
+                    }
+                )
+            if stage.value == "EXTENDS":
+                item["extnds"] = item["crrltnId"]
+            if stage.value == "EXTENDED_BY":
+                item["extnddBy"] = item["correlation_id"]
+            if original_start_datetime:
+                item["original_start_datetime"] = original_start_datetime
+
+            batch.put_item(Item=item)
+    return no_stages
+
+
+def bulk_add_tracker_detail(
+    data, stage, no_stages, event_datetime, message, policy_id, policy_name
+):
+    detail_item: dict = {
+        "overrdValue": data.get("overrdValue", data.get("status")),
+        "stgName": stage.value,
+        "createDt": event_datetime.isoformat(),
+        "updateDt": event_datetime.isoformat(),
+    }
+
+    with REQUEST_TRACKER_TABLE.batch_writer() as batch:
+        for item in data["site_switch_crl_id"]:
+            pk = f"{PK_PREFIX}{item['correlation_id']}"
+            detail_item.update(
+                {
+                    "SK": f"{SK_STAGE_PREFIX}{no_stages[pk]}",
+                    "stg": no_stages[pk],
+                    "PK": pk,
+                    "GSI1PK": f"{GSI1PK_PREFIX}{item['site']}",
+                    "GSI1SK": f"{GSI1SK_PREFIX}{item['correlation_id']}",
+                    "GSI2PK": f"{GSI2PK_PREFIX}{item['sub_id']}",
+                    "GSI2SK": f"{GSI2SK_PREFIX}{item['correlation_id']}",
+                    "crrltnId": item["correlation_id"],
+                    "mtrSrlNo": item["switch_addresses"],
+                    "subId": item["sub_id"],
+                }
+            )
+            if message:
+                detail_item["message"] = message
+
+            if policy_id:
+                detail_item["plcyId"] = policy_id
+
+            if policy_name:
+                detail_item["plcyName"] = policy_name
+            if stage.value == "EXTENDS":
+                detail_item[
+                    "message"
+                ]: str = f"Request {item['correlation_id']} extends request {item['crrltnId']}"
+                detail_item["extnds"] = item["crrltnId"]
+            if stage.value == "EXTENDED_BY":
+                detail_item[
+                    "message"
+                ]: str = f"Request {item['crrltnId']} has been extended by request {item['correlation_id']}"
+                detail_item["extnddBy"] = item["correlation_id"]
+            batch.put_item(item=detail_item)
+            # if stage.value not in [
+            #     Stage.POLICY_CREATED.value,
+            #     Stage.POLICY_EXTENDED.value,
+            #     Stage.POLICY_DEPLOYED.value,
+            # ]:
+            #     payload = assemble_event_payload(
+            #         item["correlation_id"], stage.value, event_datetime, message
+            #     )
+            #     deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
+def bulk_update_records(
+    records,
+    stage: Stage,
+    event_datetime: datetime,
+    policy_id: int = None,
+    policy_name: str = None,
+    message: str = "",
+    original_start_datetime=None,
+):
+    no_stages = bulk_update_header_records(
+        records,
+        stage,
+        event_datetime,
+        policy_id,
+        policy_name,
+        original_start_datetime=original_start_datetime,
+    )
+    bulk_add_tracker_detail(
+        records, stage, no_stages, event_datetime, message, policy_id, policy_name
     )
 
 
@@ -379,8 +532,16 @@ def add_tracker_detail(
     :param extended_by: correlation id of the request that this request is extended by
     :param extends: correlation id of the request that this request extends
     """
-    # logger.debug("Adding tracker detail record for correlation id %s", correlation_id)
-    # logger.debug("%s / %s / %s / %s / %s / %s", sub_id, request_site, stg_no, stage, event_datetime, message)
+    logger.debug("Adding tracker detail record for correlation id %s", correlation_id)
+    logger.debug(
+        "%s / %s / %s / %s / %s / %s",
+        sub_id,
+        request_site,
+        stg_no,
+        stage,
+        event_datetime,
+        message,
+    )
 
     detail_item: dict = {
         "PK": f"{PK_PREFIX}{correlation_id}",
@@ -606,12 +767,6 @@ def get_contiguous_request(request: dict) -> Tuple[dict, dict]:
 
 
 def group_contiguous_requests(existing_data, req_data):
-    """
-    Process records in event and get the all 'body'.
-    Split the records that not have the group_id in 'body'.
-    Group records that have group_id and add new field 'site_and_switch'.
-    Finally, merge the both records and return.
-    """
     existing_data_list = existing_data if isinstance(existing_data, list) else []
     req_data_list = req_data.get("site_switch_crl_id", [])
 
@@ -628,7 +783,6 @@ def group_contiguous_requests(existing_data, req_data):
         "site_switch_crl_id": [],
     }
     grouped_data = {}
-    isContiguous = False
 
     for req_record in req_data_list:
         switch_addresses = req_record.get("switch_addresses")
@@ -686,7 +840,6 @@ def group_contiguous_requests(existing_data, req_data):
                     }
                 )
         else:
-            isContiguous = True
             site = req_record.get("site")
             correlation_id = req_record.get("correlation_id")
             switch_addresses = req_record.get("switch_addresses")
@@ -701,7 +854,9 @@ def group_contiguous_requests(existing_data, req_data):
                 }
             )
 
-    return request_data if isContiguous else None, list(grouped_data.values())
+    return request_data if len(request_data["site"]) > 1 else [], list(
+        grouped_data.values()
+    )
 
 
 def new_get_contiguous_request(request: dict):
@@ -721,6 +876,9 @@ def new_get_contiguous_request(request: dict):
     2. The terminal (first or last) request in the chain.
     """
     ddb_table: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
+
+    # contiguous_request: Optional[dict] = None
+    # terminal_request: Optional[dict] = None
 
     site: str = request["site"]
     start_datetime: str = request["start_datetime"]
@@ -745,6 +903,9 @@ def new_get_contiguous_request(request: dict):
     # - the latest status is POLICY_CREATED, POLICY_EXTENDED, POLICY_DEPLOYED or DLC_OVERRIDE_STARTED
     # - end date of period = this request's start date
     if isinstance(switch_addresses, list):
+        item_len = len(request["site_switch_crl_id"])
+        if item_len < 100:
+            item_len = 100
         site_switch_crl_id = request["site_switch_crl_id"]
         gsi3pk = list(
             map(
@@ -753,6 +914,7 @@ def new_get_contiguous_request(request: dict):
             )
         )
     else:
+        item_len = 100
         gsi3pk = [f"{GSI3PK_PREFIX}{site}#{switch_addresses}"]
 
     gsi3sk: str = f"{GSI3SK_PREFIX}{start_datetime}"  # Should be in ISO format.
@@ -764,45 +926,46 @@ def new_get_contiguous_request(request: dict):
         Stage.DLC_OVERRIDE_STARTED.value,
         Stage.EXTENDED_BY.value,  # needed for recognising contiguous requests to a request we are cancelling
     ]
+    for i in range(int(item_len / 100)):
+        while True:
+            if last_evaluated_key:
+                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
+                # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
+                response: dict = ddb_table.scan(
+                    TableName=REQUEST_TRACKER_TABLE_NAME,
+                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
+                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 99])
+                    & Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
+                    & Attr("currentStg").is_in(stages),
+                    ExclusiveStartKey=last_evaluated_key,
+                )
+            else:
+                # This only runs the first time - provide no ExclusiveStartKey initially.
+                response: dict = ddb_table.scan(
+                    IndexName="GSI3",
+                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
+                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 99])
+                    & Attr("svcName").gte(LOAD_CONTROL_SERVICE_NAME)
+                    & Attr("currentStg").is_in(stages),
+                )
 
-    while True:
-        if last_evaluated_key:
-            # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
-            # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
-            response: dict = ddb_table.scan(
-                TableName=REQUEST_TRACKER_TABLE_NAME,
-                # KeyConditionExpression=Key("GSI3SK").eq(gsi3sk),  # GSI3SK holds the request end date.
-                FilterExpression=Key("GSI3SK").eq(gsi3sk)
-                & Attr("GSI3PK").is_in(gsi3pk)
-                & Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
-                & Attr("currentStg").is_in(stages),
-                ExclusiveStartKey=last_evaluated_key,
-            )
-        else:
-            # This only runs the first time - provide no ExclusiveStartKey initially.
-            response: dict = ddb_table.scan(
-                TableName=REQUEST_TRACKER_TABLE_NAME,
-                # KeyConditionExpression=Key("GSI3SK").eq(gsi3sk),  # GSI3SK holds the request end date.
-                FilterExpression=Key("GSI3SK").eq(gsi3sk)
-                & Attr("GSI3PK").is_in(gsi3pk)
-                & Attr("svcName").gte(LOAD_CONTROL_SERVICE_NAME)
-                & Attr("currentStg").is_in(stages),
-            )
+            # Append retrieved records to our result set.
+            items.extend(response["Items"])
 
-        # Append retrieved records to our result set.
-        items.extend(response["Items"])
-
-        # Set our LastEvaluatedKey to the value for next operation if there is one.
-        # Otherwise, there's no more results; we can exit.
-        if "LastEvaluatedKey" in response:
-            last_evaluated_key = response["LastEvaluatedKey"]
-            # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
-        else:
-            break
+            # Set our LastEvaluatedKey to the value for next operation if there is one.
+            # Otherwise, there's no more results; we can exit.
+            if "LastEvaluatedKey" in response:
+                last_evaluated_key = response["LastEvaluatedKey"]
+                logger.debug(
+                    "Last evaluated key: %s - retrieving more records",
+                    last_evaluated_key,
+                )
+            else:
+                break
 
     if not items:
         logger.info("No contiguous requests found")
-        return request, []
+        return {"action": "createDLCPolicy", "request": [request]}
     if "site_switch_crl_id" not in request:
         contiguous_request = items[0]
         contiguous_request.update(
@@ -814,11 +977,10 @@ def new_get_contiguous_request(request: dict):
                 "switch_addresses": request["switch_addresses"],
             }
         )
-        return [], [contiguous_request]
+        return {"action": "createDLCPolicy", "request": [contiguous_request]}
     request, contiguous_requests = group_contiguous_requests(items, request)
-    logger.info("Group Contiguous requests: %s", contiguous_requests)
-    logger.info("Non Contiguous requests: %s", request)
-    return request, contiguous_requests
+
+    return {"action": "createDLCPolicy", "request": contiguous_requests + [request]}
 
 
 if __name__ == "__main__":
