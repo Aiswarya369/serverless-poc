@@ -206,10 +206,10 @@ def initiate_step_function(
     """
     step_function_client = get_step_function_client()
     try:
-        logger.info("Starting step function execution id: %s", correlation_id)
         sm_handler = StateMachineHandler(
             step_function_client, AppConfig.DLC_OVERRIDE_SM_ARN
         )
+
         step_function_id = correlation_id
         if not isinstance(correlation_id, str):
             step_function_id = "GRP-" + correlation_id[0]
@@ -217,6 +217,7 @@ def initiate_step_function(
         response = sm_handler.initiate(
             step_function_id, json.dumps(request, cls=JSONEncoder)
         )
+
         status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
 
         if status_code == HTTPStatus.OK:
@@ -282,11 +283,7 @@ def record_handler(record: SQSRecord):
 
     :param record: The SQS record.
     """
-    # request = record.json_body
-    # correlation_id = request["correlation_id"]
-    # if not is_request_pending_state_machine(correlation_id): # todo : remove unwanted records
-    #     logger.info("Request with matching correlation id: %s, has already been processed.", correlation_id)
-    #     return
+
     logger.info("Inside Record Handler")
     logger.info(record)
     if not isinstance(record["correlation_id"], str):
@@ -298,10 +295,13 @@ def record_handler(record: SQSRecord):
         ) = zip(*map(remove_processed_records, record["site_switch_crl_id"]))
 
     correlation_id = record["correlation_id"]
+    site_switch_crl_id = record["site_switch_crl_id"]
 
     request_start, request_end = update_start_end_times_on_request(record)
-    if not correlation_id:
-        reject_request([], message="No Valid correlation_id")
+
+    if not site_switch_crl_id:
+        return
+
     if request_end <= datetime.now(tz=timezone.utc):
         # logger.error("Request with correlation_id '%s', has been throttled for too long", correlation_id) # todo
         reject_request(
@@ -314,7 +314,9 @@ def record_handler(record: SQSRecord):
     request["action"] = "groupLCRequests"
     request["request"] = record
 
-    # logger.info("Starting to process DLC request with correlation_id: %s", correlation_id)
+    logger.info(
+        "Starting to process DLC request with correlation_id: %s", correlation_id
+    )
     initiate_step_function(
         correlation_id=correlation_id,
         start=request_start,
@@ -324,38 +326,17 @@ def record_handler(record: SQSRecord):
 
 
 def group_records(event):
-    """
-    Process records in event and get the all 'body'.
-    Split the records that not have the group_id in 'body'.
-    Group records that have group_id and add new field 'site_and_switch'.
-    Finally, merge the both records and return.
-    """
     data = [ast.literal_eval(i["body"]) for i in event["Records"]]
-
-    # Create a list to store records with missing group_id
     nan_records = []
 
-    # Create a dictionary to store grouped records
     grouped_records = {}
 
     for record in data:
         group_id = record.get("group_id")
 
         if group_id is None:
-            # Handle records with missing group_id
-            nan_records.append(
-                {
-                    "group_id": None,
-                    "status": record.get("status"),
-                    "start_datetime": record.get("start_datetime"),
-                    "end_datetime": record.get("end_datetime"),
-                    "switch_addresses": record.get("switch_addresses", []),
-                    "site": record.get("site", []),
-                    "correlation_id": record.get("correlation_id", []),
-                }
-            )
+            nan_records.append(record)
         else:
-            # Group records by group_id
             key = (
                 group_id,
                 record.get("status"),
@@ -375,7 +356,6 @@ def group_records(event):
                     "site_switch_crl_id": [],
                 }
 
-            # Append values to the grouped records
             switch_addresses = record.get("switch_addresses")
             site = record.get("site")
             correlation_id = record.get("correlation_id")
@@ -392,7 +372,6 @@ def group_records(event):
                 }
             )
 
-    # Convert grouped_records dictionary to a list
     grouped_records_list = list(grouped_records.values())
 
     return grouped_records_list + nan_records
@@ -412,9 +391,6 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
         logger.info("Events from SQS: %s", event)
 
         start_time = time.time()
-        start_time = time.time()
-        # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
-        #                                   context=context)
         result = list(map(record_handler, group_records(event)))
         end_time = time.time()
 
