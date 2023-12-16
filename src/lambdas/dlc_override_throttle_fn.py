@@ -215,7 +215,10 @@ def initiate_step_function(
             step_function_id = "GRP-" + correlation_id[0]
 
         response = sm_handler.initiate(
-            step_function_id, json.dumps(request, cls=JSONEncoder)
+            step_function_id,
+            json.dumps(
+                {"action": "groupLCRequests", "request": request}, cls=JSONEncoder
+            ),
         )
 
         status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
@@ -272,7 +275,7 @@ def remove_processed_records(obj):
 
 
 @RateLimiter(max_calls=RATE_LIMIT_CALLS, period=RATE_LIMIT_PERIOD_SEC)
-def record_handler(record: SQSRecord):
+def record_handler(record):
     """
     Process a single SQS record. This function is also rate limited.
     The `@RateLimiter` is used to rate limit events that contain more records than the rate limit. In which case it
@@ -286,18 +289,21 @@ def record_handler(record: SQSRecord):
 
     logger.info("Inside Record Handler")
     logger.info(record)
-    if not isinstance(record["correlation_id"], str):
+
+    request = dict(record)
+
+    if not isinstance(request["correlation_id"], str):
         (
-            record["site_switch_crl_id"],
-            record["site"],
-            record["switch_addresses"],
-            record["correlation_id"],
-        ) = zip(*map(remove_processed_records, record["site_switch_crl_id"]))
+            request["site_switch_crl_id"],
+            request["site"],
+            request["switch_addresses"],
+            request["correlation_id"],
+        ) = zip(*map(remove_processed_records, request["site_switch_crl_id"]))
 
-    correlation_id = record["correlation_id"]
-    site_switch_crl_id = record["site_switch_crl_id"]
+    correlation_id = request["correlation_id"]
+    site_switch_crl_id = request["site_switch_crl_id"]
 
-    request_start, request_end = update_start_end_times_on_request(record)
+    request_start, request_end = update_start_end_times_on_request(request)
 
     if not site_switch_crl_id:
         return
@@ -310,9 +316,9 @@ def record_handler(record: SQSRecord):
         )
         return
 
-    request = {}
-    request["action"] = "groupLCRequests"
-    request["request"] = record
+    # request = {}
+    # request["action"] = "groupLCRequests"
+    # request["request"] = record
 
     logger.info(
         "Starting to process DLC request with correlation_id: %s", correlation_id
