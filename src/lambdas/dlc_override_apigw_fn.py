@@ -169,6 +169,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     # Get stuff from incoming request.
     request: dict = json.loads(event["body"])
     subscription_id: str = event["pathParameters"]["subscription_id"]  # Always exists.
+    request["sub_id"]: str = subscription_id
 
     # Validate the request.
     errors = RequestValidator.validate_dlc_override_request(
@@ -199,12 +200,10 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     override_status: str = request["status"]
 
     # There should only be one meter serial supplied in "switch_addresses", as per validation.
-
     switch_addresses: Union[str, List[str]] = request["switch_addresses"]
-    meter_serial_number: str = (
+    request["switch_addresses"] = (
         switch_addresses[0] if type(switch_addresses) == list else switch_addresses
     )
-    request["switch_addresses"] = meter_serial_number
 
     # Create initial request tracker records.
     # We can't add the request start and end dates to the tracker header record here because we need to validate
@@ -215,9 +214,10 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         correlation_id=correlation_id,
         sub_id=subscription_id,
         request_site=site,
-        serial_no=meter_serial_number,
+        serial_no=request["switch_addresses"],
         override=override_status,
-        original_start_datetime=request["start_datetime"],
+        # request_start_date=request["start_datetime"],
+        # request_end_date=request["end_datetime"],
     )
 
     # Validate the subscription.
@@ -243,7 +243,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         request, DEFAULT_OVERRIDE_DURATION_MINUTES
     )
     if duration_errors:
-        # logger.debug("Duration errors: %s", duration_errors)
+        logger.debug("Duration errors: %s", duration_errors)
         report_errors(correlation_id, now, duration_errors)
         error_details = {
             "correlation_id": correlation_id,
@@ -272,7 +272,9 @@ def create_correlation_id(site: str, now: datetime) -> str:
     return correlation_id
 
 
-# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+# @alert_on_exception(
+#     tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
+# )
 # @tracer.capture_lambda_handler
 def lambda_handler(event: Dict[str, Any], _context: Any):
     """
@@ -283,11 +285,14 @@ def lambda_handler(event: Dict[str, Any], _context: Any):
     :returns: A http response.
     """
     try:
-        logger.info("Lambda to perform direct Load Control API override being run now")
-        logger.info(f"Event: %s", str(event))
+        logger.info(
+            "Lambda to perform direct Load Control API override being run now : %s",
+            str(event),
+        )
+
         return job_entry(event)
     except Exception as e:
-        logger.exception(
+        logger.info(
             "Failed to process DLC request event. Event: %s, Error: %s",
             str(event),
             repr(e),
