@@ -1,0 +1,12 @@
+properties([parameters([
+        string(name: "Version", description: "The version of the service to deploy:"),
+        choice(name: "Environment", choices: ["dev", "sit", "pre-prod", "prod"], description: "The AWS environment to deploy the service to:")
+])])
+
+// Jenkinsfile
+@Library('cresconet-jenkins-shared-pipelines') _
+
+REPO_NAME = "msi-load-control-functions"
+PROJECT = "msi"
+
+awsSlsDeploy(params.Version, PROJECT, params.Environment, REPO_NAME)

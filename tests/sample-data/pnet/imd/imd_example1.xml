@@ -1,0 +1,151 @@
+<?xml version="1.0"?>
+<SGGIMDsEvents xmlns="http://oracle.com/SGGIMDsEvents">
+<D1-InitialLoadIMD dateTimeTagFormat="xsd">
+<serviceProviderExternalId>PNET</serviceProviderExternalId>
+<preVEE>
+<dvcIdN>LG022102555</dvcIdN>
+<externalUOM>kWhExprtElement1</externalUOM>
+<stDt>2021-11-19T19:30:00+10:00</stDt>
+<enDt>2021-11-19T19:45:00+10:00</enDt>
+<imdType>D1IL</imdType>
+<mcIS>D1IN</mcIS>
+<inShift>D1NS</inShift>
+<mcm>1.0</mcm>
+<tz>AEST</tz>
+<spi>900</spi>
+<sts>
+<stsL>
+</stsL>
+</sts>
+<msrs>
+<mL>
+  <s>1</s>
+  <dt>2021-11-19T19:45:00+10:00</dt>
+  <q>0</q>
+  <sts>
+    <stsL>
+     <s>1</s>
+     <st>I0</st>
+    </stsL>
+    <stsL>
+     <s>2</s>
+     <st>C0</st>
+    </stsL>
+  </sts>
+</mL>
+</msrs>
+</preVEE>
+</D1-InitialLoadIMD>
+
+<D1-InitialLoadIMD dateTimeTagFormat="xsd">
+<serviceProviderExternalId>PNET</serviceProviderExternalId>
+<preVEE>
+<dvcIdN>LG022102555</dvcIdN>
+<externalUOM>kWhExprtElement2</externalUOM>
+<stDt>2021-11-19T19:30:00+10:00</stDt>
+<enDt>2021-11-19T19:45:00+10:00</enDt>
+<imdType>D1IL</imdType>
+<mcIS>D1IN</mcIS>
+<inShift>D1NS</inShift>
+<mcm>1.0</mcm>
+<tz>AEST</tz>
+<spi>900</spi>
+<sts>
+<stsL>
+</stsL>
+</sts>
+<msrs>
+<mL>
+  <s>1</s>
+  <dt>2021-11-19T19:45:00+10:00</dt>
+  <q>0</q>
+  <sts>
+    <stsL>
+     <s>1</s>
+     <st>I0</st>
+    </stsL>
+    <stsL>
+     <s>2</s>
+     <st>C0</st>
+    </stsL>
+  </sts>
+</mL>
+</msrs>
+</preVEE>
+</D1-InitialLoadIMD>
+
+<D1-InitialLoadIMD dateTimeTagFormat="xsd">
+<serviceProviderExternalId>PNET</serviceProviderExternalId>
+<preVEE>
+<dvcIdN>LG022102555</dvcIdN>
+<externalUOM>kWhImprtElement1</externalUOM>
+<stDt>2021-11-19T19:30:00+10:00</stDt>
+<enDt>2021-11-19T19:45:00+10:00</enDt>
+<imdType>D1IL</imdType>
+<mcIS>D1IN</mcIS>
+<inShift>D1NS</inShift>
+<mcm>1.0</mcm>
+<tz>AEST</tz>
+<spi>900</spi>
+<sts>
+<stsL>
+</stsL>
+</sts>
+<msrs>
+<mL>
+  <s>1</s>
+  <dt>2021-11-19T19:45:00+10:00</dt>
+  <q>0</q>
+  <sts>
+    <stsL>
+     <s>1</s>
+     <st>I0</st>
+    </stsL>
+    <stsL>
+     <s>2</s>
+     <st>C0</st>
+    </stsL>
+  </sts>
+</mL>
+</msrs>
+</preVEE>
+</D1-InitialLoadIMD>
+
+<D1-InitialLoadIMD dateTimeTagFormat="xsd">
+<serviceProviderExternalId>PNET</serviceProviderExternalId>
+<preVEE>
+<dvcIdN>LG022102555</dvcIdN>
+<externalUOM>kWhImprtElement2</externalUOM>
+<stDt>2021-11-19T19:30:00+10:00</stDt>
+<enDt>2021-11-19T19:45:00+10:00</enDt>
+<imdType>D1IL</imdType>
+<mcIS>D1IN</mcIS>
+<inShift>D1NS</inShift>
+<mcm>1.0</mcm>
+<tz>AEST</tz>
+<spi>900</spi>
+<sts>
+<stsL>
+</stsL>
+</sts>
+<msrs>
+<mL>
+  <s>1</s>
+  <dt>2021-11-19T19:45:00+10:00</dt>
+  <q>0</q>
+  <sts>
+    <stsL>
+     <s>1</s>
+     <st>I0</st>
+    </stsL>
+    <stsL>
+     <s>2</s>
+     <st>C0</st>
+    </stsL>
+  </sts>
+</mL>
+</msrs>
+</preVEE>
+</D1-InitialLoadIMD>
+
+</SGGIMDsEvents>

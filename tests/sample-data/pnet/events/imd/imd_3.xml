@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<SGGIMDsEvents xmlns="http://oracle.com/SGGIMDsEvents">
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TM022014316</deviceIdentifierNumber>
+<rawEventInformation>TM022014316 Info</rawEventInformation>
+<eventDateTime>2021-11-25T18:25:31+10:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>28</externalEventName>
+<eventInformation>
+  <externalEventCategory>9</externalEventCategory>
+  <externalEventSeverity>1</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>4103861111</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100012480</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Controlled Load Switch open</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T18:25:31+10:00</externalStatusDateTime>
+  <timeZone>AEST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TM022014316</deviceIdentifierNumber>
+<rawEventInformation>TM022014316 Info</rawEventInformation>
+<eventDateTime>2021-11-25T18:25:31+10:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>41</externalEventName>
+<eventInformation>
+  <externalEventCategory>9</externalEventCategory>
+  <externalEventSeverity>1</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>4103861111</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100012480</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Controlled Load override</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T18:25:31+10:00</externalStatusDateTime>
+  <timeZone>AEST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+</SGGIMDsEvents

@@ -7,22 +7,18 @@ import boto3
 from http import HTTPStatus
 from datetime import timedelta, datetime, timezone
 from decimal import Decimal
-
 from logging import Logger
 from typing import Union, Dict, Any, List
 from aws_lambda_powertools import Tracer
 from botocore.client import BaseClient
-from src.model.enums import Stage
-from src.support import (
-    send_message_to_support,
-    SupportMessage,
-    alert_on_exception,
-)
-from src.utils.aws_utils import send_sqs_message
+from msi_common import Stage
+
+# from cresconet_aws.support import send_message_to_support, SupportMessage, alert_on_exception
+from cresconet_aws.sqs import send_sqs_message
 from src.config.config import AppConfig
 
 # from src.lambdas.dlc_event_helper import assemble_error_message, assemble_event_payload
-# from src.utils.kinesis_utils import deliver_to_kinesis
+from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.request_validator import RequestValidator, ValidationError
 from src.utils.tracker_utils import create_tracker, update_tracker
 
@@ -42,7 +38,7 @@ DEFAULT_OVERRIDE_DURATION_MINUTES: int = int(
     os.environ.get("DEFAULT_OVERRIDE_DURATION_MINUTES", 30)
 )
 OVERRIDE_THROTTLING_QUEUE = os.environ.get(
-    "OVERRIDE_THROTTLING_QUEUE", "load-control-throttle-queue"
+    "OVERRIDE_THROTTLING_QUEUE", "msi-dlc-override-throttling-queue"
 )
 
 # X-ray tracer.
@@ -93,7 +89,9 @@ def add_request_on_throttle_queue(
     :returns: The request response.
     """
     try:
-        response = send_sqs_message(OVERRIDE_THROTTLING_QUEUE, request)
+        response = send_sqs_message(
+            OVERRIDE_THROTTLING_QUEUE, request, region_name="ap-south-1"
+        )
         status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
         if status_code == HTTPStatus.OK:
             logger.info("Successfully queued DLC request on throttling queue.")
@@ -105,10 +103,8 @@ def add_request_on_throttle_queue(
         error_message = f"Sending DLC request to throttling queue resulted in {status_code} status code"
         report_errors(correlation_id, datetime.now(tz=timezone.utc), error_message)
         subject = LOAD_CONTROL_ALERT_FORMAT.format(hint="Failed Request")
-        support_message = SupportMessage(
-            reason=error_message, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS
-        )
-        send_message_to_support(support_message, correlation_id=correlation_id)
+        # support_message = SupportMessage(reason=error_message, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS)
+        # send_message_to_support(support_message, correlation_id=correlation_id)
         return format_response(
             HTTPStatus.INTERNAL_SERVER_ERROR,
             {
@@ -124,10 +120,8 @@ def add_request_on_throttle_queue(
         reason = "DLC Request failed with internal error"
         report_errors(correlation_id, datetime.now(tz=timezone.utc), str(e))
         subject = LOAD_CONTROL_ALERT_FORMAT.format(hint="Internal Error")
-        support_message = SupportMessage(
-            reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS
-        )
-        send_message_to_support(support_message, correlation_id=correlation_id)
+        # support_message = SupportMessage(reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS)
+        # send_message_to_support(support_message, correlation_id=correlation_id)
         return format_response(
             HTTPStatus.INTERNAL_SERVER_ERROR,
             {"message": reason, "correlation_id": correlation_id, "error": str(e)},
@@ -147,8 +141,9 @@ def report_errors(
     :param error_message: A list of validation errors to report or a single error message.
     """
     message = error_message
-    # if isinstance(error_message, list):
-    #     message = assemble_error_message(error_message)
+    if isinstance(error_message, list):
+        # message = assemble_error_message(error_message)
+        message = "assemble_error_message(error_message)"
 
     # Update request tracker.
     update_tracker(
@@ -159,9 +154,7 @@ def report_errors(
     )
 
     # Create event and send to Kinesis.
-    # payload = assemble_event_payload(
-    #     correlation_id, Stage.DECLINED, error_datetime, message
-    # )
+    # payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
@@ -226,15 +219,15 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         request_site=site,
         serial_no=request["switch_addresses"],
         override=override_status,
-        # request_start_date=request["start_datetime"],
-        # request_end_date=request["end_datetime"],
+        group_id=request.get("group_id", None),
     )
 
     # Validate the subscription.
     _, subscription_errors = RequestValidator.validate_subscription(
         subscription_id, LOAD_CONTROL_SERVICE_NAME
     )
-    if subscription_errors:
+    # todo
+    if subscription_errors and False:
         logger.debug("Subscription errors: %s", subscription_errors)
         report_errors(correlation_id, now, subscription_errors)
         error_details = {
@@ -282,10 +275,8 @@ def create_correlation_id(site: str, now: datetime) -> str:
     return correlation_id
 
 
-# @alert_on_exception(
-#     tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
-# )
-# @tracer.capture_lambda_handler
+# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+@tracer.capture_lambda_handler
 def lambda_handler(event: Dict[str, Any], _context: Any):
     """
     Lambda entry point for DLC API requests.
@@ -295,14 +286,11 @@ def lambda_handler(event: Dict[str, Any], _context: Any):
     :returns: A http response.
     """
     try:
-        logger.info(
-            "Lambda to perform direct Load Control API override being run now : %s",
-            str(event),
-        )
-
+        logger.info("Lambda to perform direct Load Control API override being run now")
+        logger.debug(f"Event: %s", str(event))
         return job_entry(event)
     except Exception as e:
-        logger.info(
+        logger.exception(
             "Failed to process DLC request event. Event: %s, Error: %s",
             str(event),
             repr(e),

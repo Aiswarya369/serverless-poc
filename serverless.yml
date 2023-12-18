@@ -36,7 +36,7 @@ custom:
 
 provider:
   name: aws
-  runtime: python3.9
+  runtime: python3.8
   region: ap-south-1
   iamRoleStatements:
     - Effect: Allow
@@ -47,7 +47,6 @@ provider:
       Resource: "*"
   layers:
     - Ref: PythonRequirementsLambdaLayer
-    # - arn:aws:lambda:ap-south-1:336392948345:layer:AWSSDKPandas-Python39:12
   tracing:
     lambda: ${self:custom.XRAY_TRACING_ENABLED}
     
@@ -57,6 +56,8 @@ package:
   patterns:
     - "!./**"
     - "./src/**/*.*"
+    - "./msi_common/**/*.*"
+    - "./cresconet_aws/**/*.*"
 
 functions:
   dlc-override-statemachine-fn:

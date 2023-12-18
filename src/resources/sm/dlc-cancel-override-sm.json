@@ -383,8 +383,7 @@
             "DataType": "String",
             "StringValue.$": "$.errorMessage.priority"
           }
-        },
-        "TopicArn": "${self:custom.SUPPORT_SNS_ARN}"
+        }
       },
       "Next": "Fail"
     },

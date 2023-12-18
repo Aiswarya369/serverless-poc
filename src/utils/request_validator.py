@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from logging import Logger
 from typing import Tuple, Optional, List
+
 import boto3
 from boto3.dynamodb.conditions import Key, Attr, Not
 from botocore.client import BaseClient
-from src.model.enums import Stage
+from msi_common import Stage
 
 from src.utils.aws_utils import get_subscription
 
@@ -102,7 +103,7 @@ class RequestValidator:
             )
         elif (
             check
-            and isinstance(request["switch_addresses"], list)
+            and (not isinstance(request["switch_addresses"], str))
             and len(request["switch_addresses"]) > 1
         ):
             # Can provide a string or a list containing one string.

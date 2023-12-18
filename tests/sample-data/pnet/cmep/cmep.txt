@@ -1,0 +1,14 @@
+Query params:
+{
+  "messageFormat": "niscMEPMD01V1",
+  "fileName": "AUTenant_MEPMD01_20211119080500_91008601_147531.txt"
+}
+
+headers:
+{
+  "content-length": "258",
+  "authorization": "Basic cHVzaGxwdXNlcjpEZEAkNVRAOQ==",
+  "accept": "*/*",
+  "user-agent": "curl/7.29.0",
+  "content-type": "application/octet-stream"
+}

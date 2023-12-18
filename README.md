@@ -1,82 +1,104 @@
-<!--
-title: 'AWS Python Example'
-description: 'This template demonstrates how to deploy a Python function running on AWS Lambda using the traditional Serverless Framework.'
-layout: Doc
-framework: v3
-platform: AWS
-language: python
-priority: 2
-authorLink: 'https://github.com/serverless'
-authorName: 'Serverless, inc.'
-authorAvatar: 'https://avatars1.githubusercontent.com/u/13742415?s=200&v=4'
--->
+# MSI Load Control Functions
+
+## Purpose
+
+***
+Includes Lambdas for handling load control on meters
+See: [Load Control services](https://cresconet.atlassian.net/wiki/spaces/MSI/pages/2425815201/Load+Control+services)
+
+## Resources
+
+***
+
+### Lambda Functions
+
+- `msi-<stage>-dlc-override-apigw-fn`:
+    - Source: [dlc_override_apigw_fn.py](./src/lambdas/dlc_override_apigw_fn.py)
+    - Docs:
+      [Lambda - initiate Load Control override](https://cresconet.atlassian.net/wiki/spaces/MSI/pages/2426437695/Lambda+-+initiate+Load+Control+override)
 
 
-# Serverless Framework AWS Python Example
+- `msi-<stage>-dlc-override-statemachine-fn`:
+    - Source: [dlc_override_statemachine_fn.py](./src/lambdas/dlc_override_statemachine_fn.py)
+    - Docs:
+      [Lambda - perform direct Load Control override](https://cresconet.atlassian.net/wiki/spaces/MSI/pages/2426208323/Lambda+-+perform+direct+Load+Control+override)
 
-This template demonstrates how to deploy a Python function running on AWS Lambda using the traditional Serverless Framework. The deployed function does not include any event definitions as well as any kind of persistence (database). For more advanced configurations check out the [examples repo](https://github.com/serverless/examples/) which includes integrations with SQS, DynamoDB or examples of functions that are triggered in `cron`-like manner. For details about configuration of specific `events`, please refer to our [documentation](https://www.serverless.com/framework/docs/providers/aws/events/).
 
-## Usage
+- `msi-<stage>-get-request-status`:
+    - Source: [dlc_get_request_status.py](./src/lambdas/dlc_get_request_status.py)
+    - Docs:
+      [Lambda - get direct Load Control request status](https://cresconet.atlassian.net/wiki/spaces/MSI/pages/2468577281/Lambda+-+get+direct+Load+Control+request+status)
 
-### Deployment
 
-In order to deploy the example, you need to run the following command:
+- `msi-<stage>-dlc-cancel-override-apigw-fn`:
+    - Source: [dlc_cancel_override_apigw_fn.py](./src/lambdas/dlc_cancel_override_apigw_fn.py)
+    - Docs:
+      [Lambda - Initiate Cancel Load Control Override](https://cresconet.atlassian.net/wiki/spaces/MSI/pages/2467266581/Lambda+-+Initiate+Cancel+Load+Control+Override)
 
-```
-$ serverless deploy
-```
 
-After running deploy, you should see output similar to:
+- `msi-<stage>-dlc-cancel-override-statemachine-fn`:
+    - Source: [dlc_override_statemachine_fn.py](./src/lambdas/dlc_override_statemachine_fn.py)
+    - Docs:
+      [State Machine - Cancel Load Control Override](https://cresconet.atlassian.net/wiki/spaces/MSI/pages/2581627043/State+Machine+-+Cancel+Load+Control+Override)
 
-```bash
-Deploying aws-python-project to stage dev (us-east-1)
+## Dependencies
 
-✔ Service deployed to stack aws-python-project-dev (112s)
+***
 
-functions:
-  hello: aws-python-project-dev-hello (1.5 kB)
-```
+### Local Pre-requisites
 
-### Invocation
+- Cresconet Nexus repositories set up in Poetry
+  ````shell
+  poetry config repositories.cresconet https://ci-cd.cresconet-services.com/nexus/repository/pypi-releases/simple 
+  poetry config http-basic.cresconet <username> <password>
+  ````
+- IP Whitelisted in `cisystem-alb-sg` on `intellihub-nz` (Oncor Dev Account)
 
-After successful deployment, you can invoke the deployed function by using the following command:
+### Installing Dependencies
 
-```bash
-serverless invoke --function hello
-```
+````shell
+# installs dependencies from package-lock.json
+npm ci 
+# installs dependencies from poetry-lock.json
+poetry install
+````
 
-Which should result in response similar to the following:
+### Incrementing Versions
 
-```json
-{
-    "statusCode": 200,
-    "body": "{\"message\": \"Go Serverless v3.0! Your function executed successfully!\", \"input\": {}}"
-}
-```
+When incrementing versions or adding/updating dependencies:
 
-### Local development
+1. Ensure that versions in `package.json` and `pyproject.toml` are inline.
+2. Update dependencies:
+    ````shell
+    # updates package-lock.json
+    npm install
+    # updates poetry-lock.json
+    poetry update
+    ````
+3. Commit `package-lock.json` and `poetry.lock` files to source control
 
-You can invoke your function locally by using the following command:
+## Packaging
 
-```bash
-serverless invoke local --function hello
-```
+***
+*In order to check serverless set up the following can be run:*
 
-Which should result in response similar to the following:
+1. Install dependencies, see section above.
+2. Package locally
+    ````shell
+    # Package with Serverless
+    sls package --stage <stage>
+    ````
 
-```
-{
-    "statusCode": 200,
-    "body": "{\"message\": \"Go Serverless v3.0! Your function executed successfully!\", \"input\": {}}"
-}
-```
+## Deployment
 
-### Bundling dependencies
+***
 
-In case you would like to include third-party dependencies, you will need to use a plugin called `serverless-python-requirements`. You can set it up by running the following command:
+### Pre-requisites
 
-```bash
-serverless plugin install -n serverless-python-requirements
-```
+- Shared Lambda layers deployed as part of cloud formation stack
+  [msi-lambda-layer](https://bitbucket.org/teamravens/msi-lambda-layer/src/develop/)
 
-Running the above will automatically add `serverless-python-requirements` to `plugins` section in your `serverless.yml` file and add it as a `devDependency` to `package.json` file. The `package.json` file will be automatically created if it doesn't exist beforehand. Now you will be able to add your dependencies to `requirements.txt` file (`Pipfile` and `pyproject.toml` is also supported but requires additional configuration) and they will be automatically injected to Lambda package during build process. For more details about the plugin's configuration, please refer to [official documentation](https://github.com/UnitedIncome/serverless-python-requirements).
+### Deployments
+
+Deployments are done via Jenkins, using [`Jenkinsfile_deploy`](./Jenkinsfile_deploy)
+and [CrescoNet Shared Pipelines](https://bitbucket.org/teamravens/cresconet-jenkins-shared-pipelines)

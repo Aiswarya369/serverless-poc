@@ -7,17 +7,17 @@ from typing import Union, Optional
 import boto3 as boto3
 from botocore.client import BaseClient
 from botocore.errorfactory import ClientError
-from src.model.enums import Stage
+from msi_common import Stage
 from src.config.config import AppConfig
 from src.statemachine.state_machine_handler import StateMachineHandler
 from src.utils.request_validator import RequestValidator
 from src.utils.tracker_utils import get_header_record
-# from cresconet_aws.support import send_message_to_support, SupportMessage, alert_on_exception
+from cresconet_aws.support import send_message_to_support, SupportMessage, alert_on_exception
 
 # -----------------------
 # Environmental variables
 # -----------------------
-REGION = os.environ.get("REGION", "ap-south-1")
+REGION = os.environ.get("REGION", "ap-southeast-2")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", logging.INFO)
 
 # ---------
@@ -206,9 +206,9 @@ def process_request(event: dict) -> dict:
             subject = CANCEL_OVERRIDE_ALERT_SUBJECT_FORMAT.format(hint="Client Internal Error")
             reason = "Direct load control cancel request failed with internal error"
 
-        # support_message = SupportMessage(reason=reason, subject=subject, stack_trace=repr(e),
-        #                                  tags=AppConfig.LOAD_CONTROL_TAGS)
-        # send_message_to_support(support_message, correlation_id=correlation_id)
+        support_message = SupportMessage(reason=reason, subject=subject, stack_trace=repr(e),
+                                         tags=AppConfig.LOAD_CONTROL_TAGS)
+        send_message_to_support(support_message, correlation_id=correlation_id)
         return format_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
             "message": reason,
             "correlation_id": correlation_id
@@ -217,16 +217,16 @@ def process_request(event: dict) -> dict:
         logger.exception(str(e))
         subject = CANCEL_OVERRIDE_ALERT_SUBJECT_FORMAT.format(hint="Internal Error")
         reason = "Direct load control cancel request failed with internal error"
-        # support_message = SupportMessage(reason=reason, subject=subject, stack_trace=repr(e),
-        #                                  tags=AppConfig.LOAD_CONTROL_TAGS)
-        # send_message_to_support(support_message, correlation_id=correlation_id)
+        support_message = SupportMessage(reason=reason, subject=subject, stack_trace=repr(e),
+                                         tags=AppConfig.LOAD_CONTROL_TAGS)
+        send_message_to_support(support_message, correlation_id=correlation_id)
         return format_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
             "message": reason,
             "correlation_id": correlation_id
         })
 
 
-# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+@alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
 def lambda_handler(event: dict, _):
     """
     Main processing.

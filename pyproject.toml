@@ -5,7 +5,7 @@ description = "Functions for Load Control"
 authors = []
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.8"
 aws-lambda-powertools = {extras = ["all"], version = "^2.14.0"}
 ratelimiter = "^1.2.0"
 

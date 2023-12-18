@@ -1,0 +1,383 @@
+<?xml version="1.0"?>
+<SGGIMDsEvents xmlns="http://oracle.com/SGGIMDsEvents">
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:33:30+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4081</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>General Device Error</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:33:30+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:28:13+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2021</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Policy Enforcement failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:28:13+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>N150000099</deviceIdentifierNumber>
+<rawEventInformation>N150000099 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:24:16+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4043</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>1099569424CN830</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100651196</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Power Restoration notification received</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:24:16+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:23:46+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2021</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Policy Enforcement failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:23:46+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>N150000099</deviceIdentifierNumber>
+<rawEventInformation>N150000099 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:23:13+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4042</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>1099569424CN830</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100651196</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Power Outage notification (Last Gasp)</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:23:13+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:21:30+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4081</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>General Device Error</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:21:30+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:12:59+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2021</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Policy Enforcement failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:12:59+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:12:59+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2021</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Policy Enforcement failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:12:59+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:09:29+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4081</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>General Device Error</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:09:29+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T20:06:42+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2021</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Policy Enforcement failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T20:06:42+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T19:57:37+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2021</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Policy Enforcement failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T19:57:37+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>N200034667</deviceIdentifierNumber>
+<rawEventInformation>N200034667 Info</rawEventInformation>
+<eventDateTime>2021-11-25T19:57:30+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4043</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>0000200410UN092</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650156</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Power Restoration notification received</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T19:57:30+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TPW1803332</deviceIdentifierNumber>
+<rawEventInformation>TPW1803332 Info</rawEventInformation>
+<eventDateTime>2021-11-25T19:57:28+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4081</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>Testjig02</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650271</externalCommunicationModuleIdentifier>
+  <externalStatusValue>General Device Error</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T19:57:28+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>N200034667</deviceIdentifierNumber>
+<rawEventInformation>N200034667 Info</rawEventInformation>
+<eventDateTime>2021-11-25T19:57:14+12:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>4042</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>2</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>0000200410UN092</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100650156</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Power Outage notification (Last Gasp)</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T19:57:14+12:00</externalStatusDateTime>
+  <timeZone>NZST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TM022014316</deviceIdentifierNumber>
+<rawEventInformation>TM022014316 Info</rawEventInformation>
+<eventDateTime>2021-11-25T18:25:30+10:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2023</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>1</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>4103861111</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100012480</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Load Control Switch Override - switch open success</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T18:25:30+10:00</externalStatusDateTime>
+  <timeZone>AEST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TM022014316</deviceIdentifierNumber>
+<rawEventInformation>TM022014316 Info</rawEventInformation>
+<eventDateTime>2021-11-25T18:20:47+10:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>2021</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>4103861111</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100012480</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Policy Enforcement failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T18:20:47+10:00</externalStatusDateTime>
+  <timeZone>AEST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TM022014316</deviceIdentifierNumber>
+<rawEventInformation>TM022014316 Info</rawEventInformation>
+<eventDateTime>2021-11-25T18:20:47+10:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>1029</externalEventName>
+<eventInformation>
+  <externalEventCategory>2</externalEventCategory>
+  <externalEventSeverity>3</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>4103861111</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100012480</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Load Control Switch open failure</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T18:20:47+10:00</externalStatusDateTime>
+  <timeZone>AEST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TM022014316</deviceIdentifierNumber>
+<rawEventInformation>TM022014316 Info</rawEventInformation>
+<eventDateTime>2021-11-25T18:16:34+10:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>43</externalEventName>
+<eventInformation>
+  <externalEventCategory>9</externalEventCategory>
+  <externalEventSeverity>1</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>4103861111</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100012480</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Controlled Load override timer expired.</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T18:16:34+10:00</externalStatusDateTime>
+  <timeZone>AEST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+<D1-DeviceEventSeeder>
+<externalSenderId>PNET</externalSenderId>
+<deviceIdentifierNumber>TM022014316</deviceIdentifierNumber>
+<rawEventInformation>TM022014316 Info</rawEventInformation>
+<eventDateTime>2021-11-25T17:47:34+10:00</eventDateTime>
+<externalSourceIdentifier>PNET</externalSourceIdentifier>
+<externalEventName>41</externalEventName>
+<eventInformation>
+  <externalEventCategory>9</externalEventCategory>
+  <externalEventSeverity>1</externalEventSeverity>
+  <externalDeviceType>Meter</externalDeviceType>
+  <externalServiceLocationId>4103861111</externalServiceLocationId>
+  <externalCommunicationModuleIdentifier>355808100012480</externalCommunicationModuleIdentifier>
+  <externalStatusValue>Controlled Load override</externalStatusValue>
+  <externalStatusDateTime>2021-11-25T17:47:34+10:00</externalStatusDateTime>
+  <timeZone>AEST</timeZone>
+  <dateTimesInStandard>D1YS</dateTimesInStandard>
+</eventInformation>
+</D1-DeviceEventSeeder>
+
+</SGGIMDsEvents>

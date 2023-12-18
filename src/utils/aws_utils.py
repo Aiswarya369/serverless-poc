@@ -15,7 +15,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", logging.INFO))
 
 # Environmental variables.
 REGION: str = os.environ.get('REGION', 'ap-south-1')
-SUBSCRIPTION_TABLE_NAME: str = os.environ.get("SUBSCRIPTION_TABLE_NAME", "subscriptions-ddb")
+SUBSCRIPTION_TABLE_NAME: str = os.environ.get("SUBSCRIPTION_TABLE_NAME", "msi-dev-subscriptions-ddb")
 
 # Boto3 resources and clients.
 DYNAMODB_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)

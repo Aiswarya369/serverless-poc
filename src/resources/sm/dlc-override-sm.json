@@ -7,7 +7,7 @@
       "Branches": [
         {
           "StartAt": "Validate and Group LC Requests",
-          "States": {     
+          "States": {
             "Validate and Group LC Requests": {
               "Type": "Task",
               "Resource": "arn:aws:states:::lambda:invoke",

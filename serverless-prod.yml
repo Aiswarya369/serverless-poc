@@ -1,0 +1,9 @@
+xray_tracing_enabled: false
+override_throttling_config:
+  queue_config:
+    batch_window: 20
+    batch_size: 1000
+    max_concurrency: 4
+  lambda_rate_limit_config:
+    calls_limit: 2000
+    period_sec: 60

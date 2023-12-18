@@ -5,7 +5,7 @@ import uuid
 
 import boto3
 from botocore.client import BaseClient
-from src.model.enums import Stage, EventType
+from msi_common import Stage, EventType
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(name="KinesisUtils")
@@ -13,7 +13,7 @@ logger = logging.getLogger(name="KinesisUtils")
 # Environment lookup, if null set to INFO level.
 logger.setLevel(os.environ.get("LOG_LEVEL", logging.INFO))
 
-REGION: str = os.environ.get("REGION", "ap-south-1")
+REGION: str = os.environ.get("REGION", "ap-southeast-2")
 
 # Boto3 resources and clients.
 KINESIS_CLIENT: BaseClient = boto3.client("kinesis", region_name=REGION)
