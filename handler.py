@@ -8,12 +8,13 @@ for i in range(1, 2):
     payload = json.dumps(
         {
             "site": "AJ0000000{}".format(i),
-            "start_datetime": "2023-12-16T107:00:00+00:00",
-            "end_datetime": "2023-12-16T07:30:00+00:00",
+            "start_datetime": "2023-12-18T14:30:00+00:00",
+            "end_datetime": "2023-12-18T14:45:00+00:00",
             "status": "ON",
             "switch_addresses": "LG02210255{}".format(i),
             "group_id": "G1",
         }
     )
     response = requests.request("POST", url, headers=headers, data=payload)
-    print(response)
+    response_dict = json.loads(response.text)
+    print(response_dict)

@@ -15,20 +15,20 @@ from botocore.client import BaseClient
 from src.config.config import AppConfig
 from aws_lambda_powertools import Tracer
 
-# from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
+from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
 from aws_lambda_powertools.utilities.batch import (
     BatchProcessor,
     process_partial_response,
     EventType,
 )
 
-# from aws_lambda_powertools.utilities.data_classes.sqs_event import SQSRecord
+from aws_lambda_powertools.utilities.data_classes.sqs_event import SQSRecord
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-# from src.lambdas.dlc_event_helper import assemble_event_payload
+from src.lambdas.dlc_event_helper import assemble_event_payload
 from src.statemachine.state_machine_handler import StateMachineHandler
 
-# from src.utils.kinesis_utils import deliver_to_kinesis
+from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.tracker_utils import (
     update_tracker,
     is_request_pending_state_machine,
@@ -104,8 +104,8 @@ def report_error_to_client(
         request_start_date=request_start_date,
         request_end_date=request_end_date,
     )
-    # payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
-    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
+    deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
 def new_report_error_to_client(records, message):
@@ -129,8 +129,8 @@ def new_report_error_to_client(records, message):
         request_start_date=records["request_start_date"],
         request_end_date=records["request_end_date"],
     )
-    # payload = assemble_event_payload(records['correlation_id'], Stage.DECLINED, error_datetime, message)
-    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    payload = assemble_event_payload(records['correlation_id'], Stage.DECLINED, error_datetime, message)
+    deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
 def report_error_to_support(correlation_id: str, reason: str, subject_hint: str = ""):
@@ -141,9 +141,11 @@ def report_error_to_support(correlation_id: str, reason: str, subject_hint: str 
     :param reason: The reason why it failed.
     :param subject_hint: The subject hint that will appear in OpsGenie.
     """
-    # subject = LOAD_CONTROL_ALERT_FORMAT.format(hint=subject_hint)
-    # support_message = SupportMessage(reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS)
-    # send_message_to_support(support_message, correlation_id=correlation_id)
+    subject = LOAD_CONTROL_ALERT_FORMAT.format(hint=subject_hint)
+    support_message = SupportMessage(
+        reason=reason, subject=subject, tags=AppConfig.LOAD_CONTROL_TAGS
+    )
+    send_message_to_support(support_message, correlation_id=correlation_id)
 
 
 def update_start_end_times_on_request(
@@ -196,9 +198,8 @@ def update_status(response, start, end, correlation_id):
         request_start_date=start,
         request_end_date=end,
     )
-    # payload = assemble_event_payload(correlation_id, Stage.QUEUED,
-    #                                  start_date)
-    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    payload = assemble_event_payload(correlation_id, Stage.QUEUED, start_date)
+    deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
 def new_update_status(response, request):
@@ -230,9 +231,10 @@ def new_update_status(response, request):
         request_end_date=request_end_date,
         original_start_datetime=request_start_date,
     )
-    # payload = assemble_event_payload(request['correlation_id'], Stage.QUEUED,
-    #                                  start_date)
-    # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+    payload = assemble_event_payload(
+        request["correlation_id"], Stage.QUEUED, start_date
+    )
+    deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
 def initiate_step_function(correlation_id, records: Dict[str, Any]):
@@ -424,6 +426,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
             time.sleep(RATE_LIMIT_PERIOD_SEC - processing_time)
         return result
     except Exception as e:
-        return None
-        # logger.exception("Failed to process events. Error: %s, Event: %s", repr(e), event, exc_info=e)
-        # raise e
+        logger.exception(
+            "Failed to process events. Error: %s, Event: %s", repr(e), event, exc_info=e
+        )
+        raise e

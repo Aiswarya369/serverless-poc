@@ -7,7 +7,9 @@ import boto3
 from botocore.client import BaseClient
 from msi_common import Stage, EventType
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(name="KinesisUtils")
 
 # Environment lookup, if null set to INFO level.
@@ -25,6 +27,7 @@ class JSONEncoder(json.JSONEncoder):
     """
     JSON encoder to cater for Enums used when sending data to Kinesis.
     """
+
     def default(self, obj):
         if isinstance(obj, Stage):
             return obj.value
@@ -47,11 +50,7 @@ def deliver_to_kinesis(record: dict, data_stream_name: str):
     record_bytes: bytes = json.dumps(record, cls=JSONEncoder).encode(CHARSET)
     partition_key: str = str(uuid.uuid4())
 
-    response: dict = KINESIS_CLIENT.put_record(
-        StreamName=data_stream_name,
-        Data=record_bytes,
-        PartitionKey=partition_key
-    )
+    response: dict = {"record": record_bytes, "partition_key": partition_key}
     logger.debug("Kinesis response: %s", response)
     logger.info("Record successfully received by Kinesis")
 

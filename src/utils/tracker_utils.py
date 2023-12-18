@@ -839,14 +839,18 @@ def group_contiguous_requests(existing_data, req_data):
                 existing_record.get("rqstStrtDt"),
             )
             if key not in grouped_data:
+                if req_data["status"] == existing_record["overrdValue"]:
+                    policyType = "contiguousExtension"
+                else:
+                    policyType = "contiguousCreation"
+
                 grouped_data[key] = {
                     "action": "createDLCPolicy",
-                    "contiguous": True,
+                    "policyType": policyType,
                     "group_id": req_data.get("group_id"),
                     "status": req_data.get("status"),
                     "start_datetime": req_data.get("start_datetime"),
                     "end_datetime": req_data.get("end_datetime"),
-                    "overrdValue": existing_record.get("overrdValue"),
                     "original_start_datetime": existing_record.get(
                         "original_start_datetime"
                     ),
@@ -1024,12 +1028,19 @@ def new_get_contiguous_request(request: dict):
                 "status": request["status"],
                 "switch_addresses": request["switch_addresses"],
                 "action": "createDLCPolicy",
-                "contiguous": True,
             }
         )
+        if request["status"] == request["overrdValue"]:
+            request["action"] = "contiguousExtension"
+        else:
+            request["action"] = "contiguousCreation"
         return [contiguous_request]
+
     request, contiguous_requests = group_contiguous_requests(items, request)
-    return contiguous_requests + request
+    request = contiguous_requests + request
+    logger.info("Sub grouped request : %s", request)
+
+    return request
 
 
 if __name__ == "__main__":
