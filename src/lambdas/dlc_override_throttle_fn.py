@@ -13,8 +13,13 @@ from ratelimiter import RateLimiter
 from botocore.client import BaseClient
 from src.config.config import AppConfig
 from aws_lambda_powertools import Tracer
+
 # from cresconet_aws.support import SupportMessage, send_message_to_support, alert_on_exception
-from aws_lambda_powertools.utilities.batch import BatchProcessor, process_partial_response, EventType
+from aws_lambda_powertools.utilities.batch import (
+    BatchProcessor,
+    process_partial_response,
+    EventType,
+)
 from aws_lambda_powertools.utilities.data_classes.sqs_event import SQSRecord
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from src.lambdas.dlc_event_helper import assemble_event_payload
@@ -29,7 +34,9 @@ REGION: str = os.environ.get("REGION", "ap-south-1")
 REQUEST_TRACKER_TABLE_NAME: str = os.environ.get("REQUEST_TRACKER_TABLE_NAME")
 RATE_LIMIT_CALLS = int(os.environ.get("RATE_LIMIT_CALLS", 1000))
 RATE_LIMIT_PERIOD_SEC = int(os.environ.get("RATE_LIMIT_PERIOD", 60))
-DEFAULT_OVERRIDE_DURATION_MINUTES: int = int(os.environ.get("DEFAULT_OVERRIDE_DURATION_MINUTES", 30))
+DEFAULT_OVERRIDE_DURATION_MINUTES: int = int(
+    os.environ.get("DEFAULT_OVERRIDE_DURATION_MINUTES", 30)
+)
 
 # Constants
 LOAD_CONTROL_TRACER_NAME = "dlc"
@@ -41,7 +48,9 @@ processor = BatchProcessor(event_type=EventType.SQS)
 tracer = Tracer(service=LOAD_CONTROL_TRACER_NAME)
 
 # Logging Setup
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(name="LoadControlFunctions")
 logger.setLevel(LOG_LEVEL)
 
@@ -64,8 +73,12 @@ def get_step_function_client() -> BaseClient:
     return boto3.client("stepfunctions", region_name=REGION)
 
 
-def report_error_to_client(correlation_id: str, message: str, request_start_date: Optional[datetime] = None,
-                           request_end_date: Optional[datetime] = None):
+def report_error_to_client(
+    correlation_id: str,
+    message: str,
+    request_start_date: Optional[datetime] = None,
+    request_end_date: Optional[datetime] = None,
+):
     """
     Updated the request tracker with a failure status and reports the failure to the client via the Kinesis stream.
 
@@ -81,7 +94,7 @@ def report_error_to_client(correlation_id: str, message: str, request_start_date
         event_datetime=error_datetime,
         message=message,
         request_start_date=request_start_date,
-        request_end_date=request_end_date
+        request_end_date=request_end_date,
     )
     # payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
@@ -90,7 +103,7 @@ def report_error_to_client(correlation_id: str, message: str, request_start_date
 def report_error_to_support(correlation_id: str, reason: str, subject_hint: str = ""):
     """
     Reports an error to support for a given correlation_id.
-    
+
     :param correlation_id: The correlation ID for the request that failed.
     :param reason: The reason why it failed.
     :param subject_hint: The subject hint that will appear in OpsGenie.
@@ -100,7 +113,9 @@ def report_error_to_support(correlation_id: str, reason: str, subject_hint: str 
     # send_message_to_support(support_message, correlation_id=correlation_id)
 
 
-def update_start_end_times_on_request(request: Dict[str, Any]) -> Tuple[datetime, datetime]:
+def update_start_end_times_on_request(
+    request: Dict[str, Any]
+) -> Tuple[datetime, datetime]:
     """
     Mutates the start and end times on the request so that it matches the expected format
     and instantiates the values if they are missing.
@@ -109,20 +124,22 @@ def update_start_end_times_on_request(request: Dict[str, Any]) -> Tuple[datetime
     :returns: (start datetime, end datetime) of the request in UTC.
     """
     start = datetime.now(tz=timezone.utc)
-    if 'start_datetime' in request:
-        start = datetime.fromisoformat(request['start_datetime'])
+    if "start_datetime" in request:
+        start = datetime.fromisoformat(request["start_datetime"])
         start = start.astimezone(tz=timezone.utc)
-    request['start_datetime'] = start.isoformat(timespec='seconds')
+    request["start_datetime"] = start.isoformat(timespec="seconds")
 
     end = start + timedelta(minutes=DEFAULT_OVERRIDE_DURATION_MINUTES)
-    if 'end_datetime' in request:
-        end = datetime.fromisoformat(request['end_datetime'])
+    if "end_datetime" in request:
+        end = datetime.fromisoformat(request["end_datetime"])
         end = end.astimezone(tz=timezone.utc)
-    request['end_datetime'] = end.isoformat(timespec='seconds')
+    request["end_datetime"] = end.isoformat(timespec="seconds")
     return start, end
 
 
-def initiate_step_function(correlation_id: str, start: datetime, end: datetime, request: Dict[str, Any]):
+def initiate_step_function(
+    correlation_id: str, start: datetime, end: datetime, request: Dict[str, Any]
+):
     """
     Initiates the step function that will process override DLC request.
 
@@ -134,19 +151,27 @@ def initiate_step_function(correlation_id: str, start: datetime, end: datetime, 
     step_function_client = get_step_function_client()
     try:
         logger.info("Starting step function execution id: %s", correlation_id)
-        sm_handler = StateMachineHandler(step_function_client, AppConfig.DLC_OVERRIDE_SM_ARN)
-        response = sm_handler.initiate(correlation_id, json.dumps(request, cls=JSONEncoder))
+        sm_handler = StateMachineHandler(
+            step_function_client, AppConfig.DLC_OVERRIDE_SM_ARN
+        )
+        response = sm_handler.initiate(
+            correlation_id, json.dumps(request, cls=JSONEncoder)
+        )
         status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
 
         if status_code == HTTPStatus.OK:
             start_date: datetime = response["startDate"]
-            logger.info("SM invoked for DLC request. ARN: %s, StartDateTime: %s", response["executionArn"], start_date)
+            logger.info(
+                "SM invoked for DLC request. ARN: %s, StartDateTime: %s",
+                response["executionArn"],
+                start_date,
+            )
             update_tracker(
                 correlation_id=correlation_id,
                 stage=Stage.QUEUED,
                 event_datetime=start_date,
                 request_start_date=start,
-                request_end_date=end
+                request_end_date=end,
             )
             # payload = assemble_event_payload(correlation_id, Stage.QUEUED, start_date)
             # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
@@ -158,9 +183,15 @@ def initiate_step_function(correlation_id: str, start: datetime, end: datetime, 
         # report_error_to_support(correlation_id=correlation_id, reason="DLC request failed",
         #                         subject_hint="Failed Request")
     except step_function_client.exceptions.ExecutionAlreadyExists:
-        logger.info("SM already is already active for correlation_id: %s", correlation_id)
+        logger.info(
+            "SM already is already active for correlation_id: %s", correlation_id
+        )
     except Exception as e:
-        logger.exception("Exception while attempting to initiate state machine: %s", repr(e), exc_info=e)
+        logger.exception(
+            "Exception while attempting to initiate state machine: %s",
+            repr(e),
+            exc_info=e,
+        )
         # report_error_to_client(correlation_id=correlation_id, message=str(e))
         # report_error_to_support(correlation_id=correlation_id, reason="DLC Request failed with internal error",
         #                         subject_hint="Internal Error")
@@ -181,17 +212,33 @@ def record_handler(record: SQSRecord):
     request = record.json_body
     correlation_id = request["correlation_id"]
     if not is_request_pending_state_machine(correlation_id):
-        logger.info("Request with matching correlation id: %s, has already been processed.", correlation_id)
+        logger.info(
+            "Request with matching correlation id: %s, has already been processed.",
+            correlation_id,
+        )
         return
 
     request_start, request_end = update_start_end_times_on_request(request)
     if request_end <= datetime.now(tz=timezone.utc):
-        logger.error("Request with correlation_id '%s', has been throttled for too long", correlation_id)
-        report_error_to_client(correlation_id, message="Request is rejected as it has a end datetime in the past.")
+        logger.error(
+            "Request with correlation_id '%s', has been throttled for too long",
+            correlation_id,
+        )
+        report_error_to_client(
+            correlation_id,
+            message="Request is rejected as it has a end datetime in the past.",
+        )
         return
 
-    logger.info("Starting to process DLC request with correlation_id: %s", correlation_id)
-    initiate_step_function(correlation_id=correlation_id, start=request_start, end=request_end, request=request)
+    logger.info(
+        "Starting to process DLC request with correlation_id: %s", correlation_id
+    )
+    initiate_step_function(
+        correlation_id=correlation_id,
+        start=request_start,
+        end=request_end,
+        request=request,
+    )
 
 
 # @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
@@ -205,15 +252,24 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
     """
     try:
         start_time = time.time()
-        result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
-                                          context=context)
+        result = process_partial_response(
+            event=event,
+            record_handler=record_handler,
+            processor=processor,
+            context=context,
+        )
         end_time = time.time()
 
-        expected_runtime = int(round(len(event["Records"]) / RATE_LIMIT_CALLS * RATE_LIMIT_PERIOD_SEC))
+        expected_runtime = int(
+            round(len(event["Records"]) / RATE_LIMIT_CALLS * RATE_LIMIT_PERIOD_SEC)
+        )
         processing_time = int(round(end_time - start_time))
         if processing_time < expected_runtime:
             time.sleep(RATE_LIMIT_PERIOD_SEC - processing_time)
+        logger.info("Throttle result : %s", result)
         return result
     except Exception as e:
-        logger.exception("Failed to process events. Error: %s, Event: %s", repr(e), event, exc_info=e)
+        logger.exception(
+            "Failed to process events. Error: %s, Event: %s", repr(e), event, exc_info=e
+        )
         raise e

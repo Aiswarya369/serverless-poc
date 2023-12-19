@@ -38,8 +38,15 @@ provider:
   name: aws
   runtime: python3.9
   region: ap-south-1
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - states:*
+        - dynamodb:*
+        - sqs:*
+      Resource: "*"
   layers:
-    - arn:aws:lambda:ap-south-1:752671163579:layer:load-control-grouping-dev-python-requirements:12
+    - Ref: PythonRequirementsLambdaLayer
 
   tracing:
     lambda: ${self:custom.XRAY_TRACING_ENABLED}
