@@ -3,6 +3,7 @@ import boto3
 import json
 import os
 import logging
+import ast
 from http import HTTPStatus
 from typing import Any, Dict, Tuple, Optional
 from datetime import datetime, timezone, timedelta
@@ -240,9 +241,12 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
         step_function_id = correlation_id
         if not isinstance(correlation_id, str):
             step_function_id = "GRP-" + correlation_id[0]
+
         request["action"] = "groupLCRequests"
+
         response = sm_handler.initiate(
-            step_function_id, json.dumps(request, cls=JSONEncoder)
+            step_function_id,
+            json.dumps(request, cls=JSONEncoder),
         )
         status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
 
@@ -326,7 +330,7 @@ def record_handler(record):
         "Starting to process DLC request with correlation_id: %s",
         str(record["correlation_id"]),
     )
-    initiate_step_function(correlation_id=record["correlation_id"], records=record)
+    initiate_step_function(correlation_id=record["correlation_id"], request=record)
 
 
 def group_records(event):
@@ -406,6 +410,8 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
         result = list(map(record_handler, group_records(event)))
         # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
         #                                   context=context)
+
+        logger.info("Throttle result : %s", result)
         end_time = time.time()
 
         expected_runtime = int(

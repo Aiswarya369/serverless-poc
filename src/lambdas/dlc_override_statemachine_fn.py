@@ -73,7 +73,7 @@ DYNAMO_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)
 # policynet_client: Optional[PolicyNetClient] = None
 
 
-def report_errors(correlation_id, errors) -> dict:
+def report_errors(request, errors):
     """
     Report validation errors.
 
@@ -81,26 +81,31 @@ def report_errors(correlation_id, errors) -> dict:
     :param errors:
     :return:
     """
+    # message: str = assemble_error_message(errors)
+    message: str = "assemble_error_message(errors)"
     now: datetime = datetime.now(timezone.utc)
-
+    if "site_switch_crl_id" in request:
+        bulk_update_records(request, Stage.DECLINED, now, message=message)
+        return
     # Update tracker.
-    message: str = assemble_error_message(errors)
     update_tracker(
-        correlation_id=correlation_id,
+        correlation_id=request["correlation_id"],
         stage=Stage.DECLINED,
         event_datetime=now,
         message=message,
     )
 
     # Create event.
-    payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
+    payload: dict = assemble_event_payload(
+        request["correlation_id"], Stage.DECLINED, now, message
+    )
     deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
-    return {
-        "statusCode": HTTP_BAD_REQUEST,
-        "message": "Invalid request",
-        "errorDetails": [e.error for e in errors],
-    }
+    # return {
+    #     "statusCode": HTTP_BAD_REQUEST,
+    #     "message": "Invalid request",
+    #     "errorDetails": [e.error for e in errors],
+    # }
 
 
 def create_policy_update_tracker(
@@ -404,13 +409,19 @@ def handle_create_policy(request: dict) -> dict:
     """
     logger.debug("handle_create_policy:\n%s", request)
 
-    correlation_id: str = request["correlation_id"]
+    # correlation_id: str = request["correlation_id"]
     errors: list = RequestValidator.validate_dlc_override_request(
-        request, DEFAULT_OVERRIDE_DURATION_MINUTES
+        request, DEFAULT_OVERRIDE_DURATION_MINUTES, check=False
     )
 
     if errors:
-        response: dict = report_errors(correlation_id, errors)
+        report_errors(request, errors)
+
+        return {
+            "statusCode": HTTP_BAD_REQUEST,
+            "message": "Invalid request",
+            "errorDetails": [e.error for e in errors],
+        }
     else:
         # Get request(s) that are previously contiguous to this one.
         # contiguous_request, terminal_request = get_contiguous_request(request)
@@ -471,6 +482,7 @@ def handle_create_policy(request: dict) -> dict:
 
         # Add the policy deployment start datetime.
         response["deploy_start_datetime"] = deploy_start_datetime
+        response["request"] = request
         response.update({"action": "deployDLCPolicy"})
     return response
 
@@ -590,7 +602,7 @@ def lambda_handler(event: dict, _):
     action: str = event["action"]
     logger.debug("Action supplied: %s", action)
 
-    request: dict = event["request"]
+    request: dict = event
 
     # # Get PolicyNet credentials; set in our PolicyNet client object.
     # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(

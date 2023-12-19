@@ -102,33 +102,33 @@ def send_message_to_support(args: SupportMessage, **kwargs: str) -> bool:
     :param args:   the arguments provided to the payload
     :param kwargs: the extra parameters to be provided in the payload.
     """
-    if not SUPPORT_REPORTING_ENABLED:
-        return False
+    # if not SUPPORT_REPORTING_ENABLED:
+    #     return False
 
-    if SUPPORT_SNS_ARN is None:
-        raise RuntimeError("Attempted to notify support. But environment variable SUPPORT_SNS_ARN is not defined.")
+    # if SUPPORT_SNS_ARN is None:
+    #     raise RuntimeError("Attempted to notify support. But environment variable SUPPORT_SNS_ARN is not defined.")
 
-    sns_client = args.sns_client
-    if not sns_client:
-        sns_client = retrieve_sns_client()
+    # sns_client = args.sns_client
+    # if not sns_client:
+    #     sns_client = retrieve_sns_client()
 
-    message_attributes = SupportMessageAttributes(
-        alias=StringAttribute(StringValue=args.subject),
-        priority=StringAttribute(StringValue=args.priority.value),
-        tags=StringAttribute(StringValue=args.tags))
-    message = SupportMessagePayload(reason=args.reason,
-                                    subject=args.subject,
-                                    stackTrace=str(args.stack_trace),
-                                    priority=args.priority.value,
-                                    time=datetime.now(timezone.utc).isoformat(timespec=SUPPORT_TIMESPEC),
-                                    accountId=AWS_ACCOUNT_ID,
-                                    extra=kwargs)
+    # message_attributes = SupportMessageAttributes(
+    #     alias=StringAttribute(StringValue=args.subject),
+    #     priority=StringAttribute(StringValue=args.priority.value),
+    #     tags=StringAttribute(StringValue=args.tags))
+    # message = SupportMessagePayload(reason=args.reason,
+    #                                 subject=args.subject,
+    #                                 stackTrace=str(args.stack_trace),
+    #                                 priority=args.priority.value,
+    #                                 time=datetime.now(timezone.utc).isoformat(timespec=SUPPORT_TIMESPEC),
+    #                                 accountId=AWS_ACCOUNT_ID,
+    #                                 extra=kwargs)
 
-    sns_client.publish(
-        TargetArn=SUPPORT_SNS_ARN,
-        Subject=f"Alert: {args.subject}",
-        Message=json.dumps({"default": json.dumps(dataclass_as_dict(message))}),
-        MessageAttributes=dataclass_as_dict(message_attributes),
-        MessageStructure="json"
-    )
+    # sns_client.publish(
+    #     TargetArn=SUPPORT_SNS_ARN,
+    #     Subject=f"Alert: {args.subject}",
+    #     Message=json.dumps({"default": json.dumps(dataclass_as_dict(message))}),
+    #     MessageAttributes=dataclass_as_dict(message_attributes),
+    #     MessageStructure="json"
+    # )
     return True
