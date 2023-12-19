@@ -26,8 +26,7 @@ from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.request_validator import RequestValidator
 from src.utils.tracker_utils import (
     update_tracker,
-    get_contiguous_request,
-    new_get_contiguous_request,
+    get_bulk_contiguous_request,
     bulk_update_records,
 )
 
@@ -74,7 +73,7 @@ DYNAMO_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)
 # policynet_client: Optional[PolicyNetClient] = None
 
 
-def report_errors(request, errors):
+def report_errors(correlation_id, errors) -> dict:
     """
     Report validation errors.
 
@@ -82,24 +81,19 @@ def report_errors(request, errors):
     :param errors:
     :return:
     """
-    # message: str = assemble_error_message(errors)
-    message: str = "assemble_error_message(errors)"
     now: datetime = datetime.now(timezone.utc)
-    if "site_switch_crl_id" in request:
-        bulk_update_records(request, Stage.DECLINED, now, message=message)
-        return
+
     # Update tracker.
+    message: str = assemble_error_message(errors)
     update_tracker(
-        correlation_id=request["correlation_id"],
+        correlation_id=correlation_id,
         stage=Stage.DECLINED,
         event_datetime=now,
         message=message,
     )
 
     # Create event.
-    payload: dict = assemble_event_payload(
-        request["correlation_id"], Stage.DECLINED, now, message
-    )
+    payload: dict = assemble_event_payload(correlation_id, Stage.DECLINED, now, message)
     deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
     return {
@@ -196,7 +190,6 @@ def create_policy(request: dict) -> dict:
     # The response from PolicyNet doesn't include anything useful, so we'll have to be "as near as"
     # with event datetimes.
     now: datetime = datetime.now(timezone.utc)
-
     policy_name, response = create_lc_override_schedule_policy(
         meter_serials=meter_serial,
         start_datetime=start_datetime,
@@ -205,15 +198,10 @@ def create_policy(request: dict) -> dict:
         replace=replace,
     )
 
-    status_code: int = response["statusCode"]
-    message: str = response["message"]
-
     create_policy_update_tracker(
         event_datetime=now, response=response, policy_name=policy_name, request=request
     )
 
-    logger.info("Create policy response")
-    logger.info(response)
     return response
 
 
@@ -340,13 +328,15 @@ def extend_policy(request: dict) -> dict:
     """
     logger.info("Extending existing policy in PolicyNet")
 
-    # terminal_start: datetime = datetime.fromisoformat(terminal_request['rqstStrtDt'])
+    # terminal_start: datetime = datetime.fromisoformat(terminal_request["rqstStrtDt"])
+    # terminal_end: datetime = datetime.fromisoformat(terminal_request["rqstEndDt"])
+    # contiguous_start: datetime = datetime.fromisoformat(
+    #     contiguous_request["rqstStrtDt"]
+    # )
+    # contiguous_end: datetime = datetime.fromisoformat(contiguous_request["rqstEndDt"])
     terminal_start: datetime = datetime.fromisoformat(
         request["original_start_datetime"]
     )
-    # terminal_end: datetime = datetime.fromisoformat(terminal_request['rqstEndDt'])
-    # contiguous_start: datetime = datetime.fromisoformat(contiguous_request['rqstStrtDt'])
-    # contiguous_end: datetime = datetime.fromisoformat(contiguous_request['rqstEndDt'])
 
     # New request's start and end dates will be added as default values when we initiated the Step Function execution
     # if they were not explicitly provided.
@@ -357,8 +347,6 @@ def extend_policy(request: dict) -> dict:
     # to derive an extended period for the existing request.
     duration = int((new_end - terminal_start).total_seconds() / 60)
 
-    # logger.debug("Terminal request was from %s to %s", terminal_start, terminal_end)
-    # logger.debug("Contiguous request was from %s to %s", contiguous_start, contiguous_end)
     logger.debug("New request is from %s to %s", new_start, new_end)
     logger.debug(
         "Extended policy will be from %s for %s minutes", terminal_start, duration
@@ -377,10 +365,6 @@ def extend_policy(request: dict) -> dict:
         turn_off=turn_off,
         duration=duration,
     )
-
-    status_code: int = response["statusCode"]
-    message: str = response["message"]
-    policy_id: int = response["policyID"]
 
     extend_policy_update_tracker(
         request=request, event_datetime=now, response=response, policy_name=policy_name
@@ -401,7 +385,7 @@ def is_being_enforced(start: datetime, end: datetime, now: datetime):
     return True if start <= now < end else False
 
 
-def handle_create_policy(request: dict):
+def handle_create_policy(request: dict) -> dict:
     """
     PolicyNet policy creation.
 
@@ -420,30 +404,27 @@ def handle_create_policy(request: dict):
     """
     logger.debug("handle_create_policy:\n%s", request)
 
+    correlation_id: str = request["correlation_id"]
     errors: list = RequestValidator.validate_dlc_override_request(
-        request, DEFAULT_OVERRIDE_DURATION_MINUTES, check=False
+        request, DEFAULT_OVERRIDE_DURATION_MINUTES
     )
+
     if errors:
-        report_errors(request, errors)
-
-        return {
-            "statusCode": HTTP_BAD_REQUEST,
-            "message": "Invalid request",
-            "errorDetails": [e.error for e in errors],
-        }
-
+        response: dict = report_errors(correlation_id, errors)
     else:
         # Get request(s) that are previously contiguous to this one.
+        # contiguous_request, terminal_request = get_contiguous_request(request)
+
         now: datetime = datetime.now(timezone.utc)
         deploy_start_datetime: str = now.strftime(POLICY_DEPLOY_DATETIME_FORMAT)
         logger.debug(
             "Default policy deployment start datetime: %s", deploy_start_datetime
         )
-        # for contiguous_request in contiguous_requests:
+
         # Contiguous with the same switch direction
         if "policyType" in request:
             if request["policyType"] == "contiguousExtension":
-                logger.debug("Contiguous request: %s", request)
+                # logger.debug("Contiguous request: %s", contiguous_request)
                 # logger.debug("Terminal request: %s", terminal_request)
 
                 # Extend policy in PolicyNet.
@@ -461,14 +442,16 @@ def handle_create_policy(request: dict):
                         deploy_start: datetime = start + timedelta(
                             minutes=CONTIGUOUS_START_BUFFER_MINUTES
                         )
-                        # deploy_start_datetime: str = deploy_start.strftime(POLICY_DEPLOY_DATETIME_FORMAT)
+                        deploy_start_datetime: str = deploy_start.strftime(
+                            POLICY_DEPLOY_DATETIME_FORMAT
+                        )
                         logger.info(
                             "Setting policy deployment start datetime to %s",
                             deploy_start_datetime,
                         )
 
             # Contiguous with the opposite switch direction
-            else:
+            elif request["policyType"] == "contiguousCreation":
                 # When there is a contiguous request of the opposite switch direction we need to push back the start
                 # datetime so the contiguous request has time to finish as it doesn't finish exactly at the end time in
                 # PolicyNet.
@@ -481,16 +464,15 @@ def handle_create_policy(request: dict):
                 request["start_datetime"] = start_datetime_str
                 request["replace"] = True
                 response: dict = create_policy(request)
-            response["deploy_start_datetime"] = deploy_start_datetime
-            response["request"] = request
         else:
+            # No contiguous request - create a new stand-alone policy and deploy straight away.
             request["replace"] = False
             response: dict = create_policy(request)
-            response["deploy_start_datetime"] = deploy_start_datetime
-            response["request"] = request
+
         # Add the policy deployment start datetime.
+        response["deploy_start_datetime"] = deploy_start_datetime
         response.update({"action": "deployDLCPolicy"})
-        return response
+    return response
 
 
 def handle_deploy_policy(event: dict):
@@ -503,12 +485,13 @@ def handle_deploy_policy(event: dict):
     logger.debug("handle_deploy_policy: %s", event)
     logger.info("Deploying policy in PolicyNet")
 
-    correlation_id = event["request"]["correlation_id"]
+    correlation_id: str = event["request"]["correlation_id"]
     request = event["request"]
 
     if "policyID" not in event:
         now: datetime = datetime.now(timezone.utc)
         message: str = "Invalid request: policy deployment needs policy id"
+
         # Update tracker.
         if "site_switch_crl_id" in request:
             bulk_update_records(request, Stage.DECLINED, now, message=message)
@@ -579,7 +562,9 @@ def handle_deploy_policy(event: dict):
     return response
 
 
-# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+# @alert_on_exception(
+#     tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
+# )
 # @tracer.capture_lambda_handler
 def lambda_handler(event: dict, _):
     """
@@ -605,20 +590,29 @@ def lambda_handler(event: dict, _):
     action: str = event["action"]
     logger.debug("Action supplied: %s", action)
 
-    request: dict = event
+    request: dict = event["request"]
 
-    # Get PolicyNet credentials; set in our PolicyNet client object.
-    # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(AppConfig.PNET_AUTH_DETAILS_SECRET_ID)
-    #
+    # # Get PolicyNet credentials; set in our PolicyNet client object.
+    # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(
+    #     AppConfig.PNET_AUTH_DETAILS_SECRET_ID
+    # )
+
     # if not policynet_client:
-    #     url = pnet_auth_details['pnet_url']
-    #     policynet_client = PolicyNetClient(f"{url}/PolicyNet.wsdl", url, DYNAMO_RESOURCE,
-    #                                        session_table=PNET_SESSION_TABLE,
-    #                                        session_lifetime=PNET_SESSION_LIFETIME_SECONDS)
-    #     policynet_client.set_credentials(pnet_auth_details['pnet_username'], pnet_auth_details['pnet_password'])
+    #     url = pnet_auth_details["pnet_url"]
+    #     policynet_client = PolicyNetClient(
+    #         f"{url}/PolicyNet.wsdl",
+    #         url,
+    #         DYNAMO_RESOURCE,
+    #         session_table=PNET_SESSION_TABLE,
+    #         session_lifetime=PNET_SESSION_LIFETIME_SECONDS,
+    #     )
+    #     policynet_client.set_credentials(
+    #         pnet_auth_details["pnet_username"], pnet_auth_details["pnet_password"]
+    #     )
     #     logger.debug("Set credentials in PolicyNet client")
-    if action == SupportedOverrideSMActions.CHECK_DLC_POLICY.value:
-        response = new_get_contiguous_request(request)
+
+    if action == SupportedOverrideSMActions.GROUP_DLC_REQUESTS.value:
+        response = get_bulk_contiguous_request(request)
     elif action == SupportedOverrideSMActions.CREATE_DLC_POLICY.value:
         response = handle_create_policy(request)
     elif action == SupportedOverrideSMActions.DEPLOY_DLC_POLICY.value:
