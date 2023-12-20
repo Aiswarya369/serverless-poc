@@ -30,7 +30,7 @@ Resources:
                   - dynamodb:Query
                 Resource:
                   - !Sub '${self:custom.SUBSCRIPTION_TABLE_ARN}/index/subId-index'
-                  - !Sub '${self:custom.REQUEST_TRACKER_TABLE_ARN}/index/GSI3'
+                  - !Sub 'arn:aws:dynamodb:ap-south-1:752671163579:table/${self:custom.REQUEST_TRACKER_TABLE_NAME}/index/GSI3'
               - Sid: "DynamoReadWriteAccess"
                 Effect: Allow
                 Action:
@@ -38,7 +38,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
-                Resource: ${self:custom.REQUEST_TRACKER_TABLE_ARN}
+                Resource: arn:aws:dynamodb:ap-south-1:752671163579:table/${self:custom.REQUEST_TRACKER_TABLE_NAME}
               - Sid: "OverrideSMAccess"
                 Effect: Allow
                 Action:
@@ -52,9 +52,9 @@ Resources:
                   - sqs:GetQueueAttributes
                   - sqs:GetQueueUrl
                 Resource:
-                  - !GetAtt OverrideThrottleQueue.Arn
-              - Sid: "SubscriptionKdsWriteOnly"
-                Effect: Allow
-                Action:
-                  - kinesis:PutRecord
-                Resource: ${self:custom.KINESIS_DATA_STREAM_ARN}
+                  - arn:aws:sqs:ap-south-1:752671163579:load-control-throttle-queue
+              # - Sid: "SubscriptionKdsWriteOnly"
+              #   Effect: Allow
+              #   Action:
+              #     - kinesis:PutRecord
+              #   Resource: ${self:custom.KINESIS_DATA_STREAM_ARN}

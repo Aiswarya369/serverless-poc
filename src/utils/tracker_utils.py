@@ -203,6 +203,65 @@ def get_header_record(correlation_id: str) -> Optional[dict]:
     return response.get("Item")
 
 
+def get_bulk_header_record(request):
+    """
+    Get request tracker header record for the supplied correlation_id.
+    Will return None if no record found
+
+    :param correlation_id: the request correlation id to use - aligns with tracker Partition Key.
+    :return: The header record.
+    """
+    logger.debug(
+        "Getting header record for correlation id %s", request["correlation_id"]
+    )
+    pk = []
+    sk = []
+    site_switch_crl_map = {}
+    site_switch_crl_ids = request["site_switch_crl_id"]
+    for site_switch_crl_id in site_switch_crl_ids:
+        site_switch_crl_map[site_switch_crl_id["switch_addresses"]] = site_switch_crl_id
+        pk.append(f"{PK_PREFIX}{site_switch_crl_id['correlation_id']}")
+        sk.append(f"{SK_REQUEST_PREFIX}{site_switch_crl_id['correlation_id']}")
+
+    items = []
+    data_len = len(site_switch_crl_ids)
+    if data_len % 100 != 0:
+        data_len += 100
+    for i in range(int(data_len / 100)):
+        last_evaluated_key = False
+        while True:
+            if last_evaluated_key:
+                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
+                # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
+                response: dict = REQUEST_TRACKER_TABLE.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+                    ExclusiveStartKey=last_evaluated_key,
+                )
+            else:
+                # This only runs the first time - provide no ExclusiveStartKey initially.
+                response: dict = REQUEST_TRACKER_TABLE.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
+                )
+            # Append retrieved records to our result set.
+            items.extend(response["Items"])
+            if "LastEvaluatedKey" in response:
+                last_evaluated_key = response["LastEvaluatedKey"]
+                # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
+            else:
+                break
+    # logger.debug("Response:\n%s", response)
+
+    for item in items:
+        if (
+            item["mtrSrlNo"] in site_switch_crl_map
+            and item["currentStg"] != Stage.RECEIVED.value
+        ):
+            site_switch_crl_map.pop(item["mtrSrlNo"])
+    return list(site_switch_crl_map.values())
+
+
 def update_header_record(
     correlation_id: str,
     new_stg_no: int,
@@ -499,7 +558,6 @@ def bulk_add_tracker_detail(
         "createDt": event_datetime.isoformat(),
         "updateDt": event_datetime.isoformat(),
     }
-
     with REQUEST_TRACKER_TABLE.batch_writer() as batch:
         for item in data["site_switch_crl_id"]:
             correlation_id = item["correlation_id"]
@@ -601,7 +659,6 @@ def bulk_update_header_records(
                 # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
             else:
                 break
-
     with table.batch_writer() as batch:
         for item in items:
             no_stages[item["PK"]] = int(item["noStages"] + 1)
@@ -640,7 +697,6 @@ def bulk_update_header_records(
                 item["GSI3SK"] = f"{GSI3SK_PREFIX}{end_date}"
 
             batch.put_item(Item=item)
-
     return no_stages
 
 
@@ -843,6 +899,34 @@ def is_request_pending_state_machine(correlation_id: str) -> bool:
     return header_record["currentStg"] == Stage.RECEIVED.value
 
 
+def bulk_is_request_pending_state_machine(requests):
+    """
+    Determines if the request is in a final state and or in progress state.
+
+    :param correlation_id: Correlation ID of a given DLC request.
+    :returns: False if the request exists and is not in an in progress or final step. Otherwise, True.
+    """
+    site_switch_crl_id = []
+    site = []
+    switch_addresses = []
+    correlation_id = []
+
+    site_switch_crl_ids = get_bulk_header_record(requests)
+
+    if site_switch_crl_ids:
+        for item in site_switch_crl_ids:
+            site_switch_crl_id.append(item)
+            site.append(item["site"])
+            switch_addresses.append(item["switch_addresses"])
+            correlation_id.append(item["correlation_id"])
+        requests["site_switch_crl_id"] = site_switch_crl_id
+        requests["site"] = site
+        requests["switch_addresses"] = switch_addresses
+        requests["correlation_id"] = correlation_id
+        return True
+    return False
+
+
 def get_contiguous_request(request: dict) -> Tuple[dict, dict]:
     """
     Get any Load Control requests which have already been deployed that are contiguous to the supplied request.
@@ -983,14 +1067,8 @@ def get_bulk_contiguous_request(request: dict):
 
     site = request["site"]
     start_datetime: str = request["start_datetime"]
-    switch_addresses = request["switch_addresses"]
 
-    logger.info(
-        "Looking for contiguous LC requests: %s / %s / %s",
-        site,
-        switch_addresses,
-        start_datetime,
-    )
+    switch_addresses = request["switch_addresses"]
 
     items: list = []
     last_evaluated_key: Optional[dict] = None

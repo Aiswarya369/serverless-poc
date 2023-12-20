@@ -23,9 +23,6 @@
             "Process LC Override Requests": {
               "Type": "Map",
               "ItemProcessor": {
-                "ProcessorConfig": {
-                  "Mode": "INLINE"
-                },
                 "StartAt": "Create LC Override Policy",
                 "States": {
                   "Create LC Override Policy": {

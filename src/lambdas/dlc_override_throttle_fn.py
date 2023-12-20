@@ -33,6 +33,7 @@ from src.utils.tracker_utils import (
     update_tracker,
     is_request_pending_state_machine,
     bulk_update_records,
+    bulk_is_request_pending_state_machine,
 )
 
 # Environmental variables
@@ -104,9 +105,7 @@ def get_step_function_client() -> BaseClient:
 #         request_start_date=request_start_date,
 #         request_end_date=request_end_date,
 #     )
-#     payload = assemble_event_payload(
-#         correlation_id, Stage.DECLINED, error_datetime, message
-#     )
+#     payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
 #     deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
 
@@ -188,6 +187,22 @@ def report_error(correlation_id, reason, subject_hint=None):
         )
 
 
+# def update_status(response, start, end, correlation_id):
+#     start_date: datetime = response["startDate"]
+#     # logger.info("SM invoked for DLC request. ARN: %s, StartDateTime: %s",
+#     #             response["executionArn"], start_date)
+#     update_tracker(
+#         correlation_id=correlation_id,
+#         stage=Stage.QUEUED,
+#         event_datetime=start_date,
+#         request_start_date=start,
+#         request_end_date=end,
+#     )
+#     # payload = assemble_event_payload(correlation_id, Stage.QUEUED,
+#     #                                  start_date)
+#     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
+
+
 def update_status(response, request):
     start_date: datetime = response["startDate"]
     logger.info(
@@ -232,6 +247,7 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
     :param end: The end of the DLC request.
     :param request: The DLC request.
     """
+
     step_function_client = get_step_function_client()
     try:
         logger.info("Starting step function execution id: %s", correlation_id)
@@ -241,15 +257,12 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
         step_function_id = correlation_id
         if not isinstance(correlation_id, str):
             step_function_id = "GRP-" + correlation_id[0]
-
         request["action"] = "groupLCRequests"
-
         response = sm_handler.initiate(
-            step_function_id,
-            json.dumps(request, cls=JSONEncoder),
+            step_function_id, json.dumps(request, cls=JSONEncoder)
         )
-        status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
 
+        status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]
         if status_code == HTTPStatus.OK:
             update_status(response, request)
             return
@@ -261,6 +274,7 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
             reason="DLC request failed",
             subject_hint="Failed Request",
         )
+
     except step_function_client.exceptions.ExecutionAlreadyExists:
         logger.info(
             "SM already is already active for correlation_id: %s", correlation_id
@@ -301,21 +315,16 @@ def record_handler(record):
 
     :param record: The SQS record.
     """
+
     if not isinstance(record["correlation_id"], str):
-        (
-            record["site_switch_crl_id"],
-            record["site"],
-            record["switch_addresses"],
-            record["correlation_id"],
-        ) = zip(*map(remove_processed_records, record["site_switch_crl_id"]))
-        site_switch_crl_id = record["site_switch_crl_id"]
-        if not site_switch_crl_id:
+        if not bulk_is_request_pending_state_machine(record):
             return
     else:
         if not is_request_pending_state_machine(record["correlation_id"]):
             return
 
     request_start, request_end = update_start_end_times_on_request(record)
+
     if request_end <= datetime.now(tz=timezone.utc):
         logger.error(
             "Request with correlation_id '%s', has been throttled for too long",
@@ -342,6 +351,7 @@ def group_records(event):
 
     :param event: The sqs events.
     """
+
     data = [ast.literal_eval(i["body"]) for i in event["Records"]]
     nan_records = []
 
@@ -350,9 +360,9 @@ def group_records(event):
     for record in data:
         group_id = record.get("group_id")
 
-        if group_id is None:  # Requests with no group_id
+        if group_id is None:
             nan_records.append(record)
-        else:  # Requests with group_id
+        else:
             key = (
                 group_id,
                 record.get("status"),
@@ -394,11 +404,12 @@ def group_records(event):
     return grouped_records_list + nan_records
 
 
-@alert_on_exception(
-    tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
-)
-@tracer.capture_lambda_handler
+# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+# @tracer.capture_lambda_handler
 def lambda_handler(event: Dict[str, Any], context: LambdaContext):
+    """
+    Expecting event contain list of record and max number of records is 1000
+    """
     """
     The lambda entry point.
 
@@ -420,7 +431,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
         processing_time = int(round(end_time - start_time))
         if processing_time < expected_runtime:
             time.sleep(RATE_LIMIT_PERIOD_SEC - processing_time)
-        return result
+        return {"batchItemFailures": []}
     except Exception as e:
         logger.exception(
             "Failed to process events. Error: %s, Event: %s", repr(e), event, exc_info=e

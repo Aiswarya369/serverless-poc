@@ -6,8 +6,8 @@
     "serverless": "^3.35.2",
     "serverless-iam-roles-per-function": "^3.2.0",
     "serverless-plugin-common-excludes": "^4.0.0",
-    "serverless-prune-plugin": "^2.0.2",
-    "serverless-python-requirements": "^6.0.1",
+    "serverless-prune-plugin": "^2.0.1",
+    "serverless-python-requirements": "^5.4.0",
     "serverless-step-functions": "^3.18.0"
   }
 }

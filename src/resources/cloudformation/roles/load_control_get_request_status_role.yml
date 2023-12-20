@@ -28,4 +28,4 @@ Resources:
                 Effect: Allow
                 Action:
                   - dynamodb:GetItem
-                Resource: ${self:custom.REQUEST_TRACKER_TABLE_ARN}
+                Resource: arn:aws:dynamodb:ap-south-1:752671163579:table/${self:custom.REQUEST_TRACKER_TABLE_NAME}
