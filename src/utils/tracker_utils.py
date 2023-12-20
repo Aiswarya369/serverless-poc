@@ -1145,7 +1145,6 @@ def get_bulk_contiguous_request(request: dict):
 
     if not items:
         logger.info("No contiguous requests found")
-        request["action"] = "createDLCPolicy"
         resp = {"request": request, "action": "createDLCPolicy"}
         return [resp]
     if "site_switch_crl_id" not in request:
@@ -1157,13 +1156,12 @@ def get_bulk_contiguous_request(request: dict):
                 "end_datetime": request["end_datetime"],
                 "status": request["status"],
                 "switch_addresses": request["switch_addresses"],
-                "action": "createDLCPolicy",
             }
         )
-        if request["status"] == contiguous_request["overrdValue"]:
-            request["policyType"] = "contiguousExtension"
-        elif request["status"] != contiguous_request["overrdValue"]:
-            request["policyType"] = "contiguousCreation"
+        if contiguous_request["status"] == contiguous_request["overrdValue"]:
+            contiguous_request["policyType"] = "contiguousExtension"
+        elif contiguous_request["status"] != contiguous_request["overrdValue"]:
+            contiguous_request["policyType"] = "contiguousCreation"
         resp = {"request": contiguous_request, "action": "createDLCPolicy"}
         return [resp]
 

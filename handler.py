@@ -7,8 +7,8 @@ headers = {"Content-Type": "application/json"}
 for i in range(1, 2):
     req = {
         "site": "AJ0000000{}".format(i),
-        "start_datetime": "2023-12-20T11:30:00+00:00",
-        "end_datetime": "2023-12-20T11:45:00+00:00",
+        "start_datetime": "2023-12-20T13:15:00+00:00",
+        "end_datetime": "2023-12-20T13:30:00+00:00",
         "status": "ON",
         "switch_addresses": "LG02210255{}".format(i),
     }
