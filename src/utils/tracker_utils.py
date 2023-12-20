@@ -1160,9 +1160,9 @@ def get_bulk_contiguous_request(request: dict):
                 "action": "createDLCPolicy",
             }
         )
-        if request["status"] == request["overrdValue"]:
+        if request["status"] == contiguous_request["overrdValue"]:
             request["policyType"] = "contiguousExtension"
-        else:
+        elif request["status"] != contiguous_request["overrdValue"]:
             request["policyType"] = "contiguousCreation"
         resp = {"request": contiguous_request, "action": "createDLCPolicy"}
         return [resp]

@@ -5,16 +5,15 @@ url = "https://tpwutkedr3.execute-api.ap-south-1.amazonaws.com/dev/service/lc/lo
 headers = {"Content-Type": "application/json"}
 
 for i in range(1, 2):
-    payload = json.dumps(
-        {
-            "site": "AJ0000000{}".format(i),
-            "start_datetime": "2023-12-20T09:30:00+00:00",
-            "end_datetime": "2023-12-20T09:45:00+00:00",
-            "status": "ON",
-            "switch_addresses": "LG02210255{}".format(i),
-            "group_id": "G1",
-        }
-    )
+    req = {
+        "site": "AJ0000000{}".format(i),
+        "start_datetime": "2023-12-20T11:30:00+00:00",
+        "end_datetime": "2023-12-20T11:45:00+00:00",
+        "status": "ON",
+        "switch_addresses": "LG02210255{}".format(i),
+    }
+    payload = json.dumps(req)
     response = requests.request("POST", url, headers=headers, data=payload)
-    response_dict = json.loads(response.text)
-    print(response_dict)
+    print(json.dumps(req, indent=4))
+    print(response.status_code, response.reason)
+    print(json.dumps(response.json(), indent=4))

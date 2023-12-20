@@ -100,8 +100,8 @@ def report_error_to_client(records, message):
         stage=Stage.DECLINED,
         event_datetime=error_datetime,
         message=message,
-        request_start_date=records["request_start_date"],
-        request_end_date=records["request_end_date"],
+        request_start_date=records["start_datetime"],
+        request_end_date=records["end_datetime"],
     )
     payload = assemble_event_payload(
         records["correlation_id"], Stage.DECLINED, error_datetime, message
