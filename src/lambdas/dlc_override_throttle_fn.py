@@ -82,33 +82,6 @@ def get_step_function_client() -> BaseClient:
     return boto3.client("stepfunctions", region_name=REGION)
 
 
-# def report_error_to_client(
-#     correlation_id: str,
-#     message: str,
-#     request_start_date: Optional[datetime] = None,
-#     request_end_date: Optional[datetime] = None,
-# ):
-#     """
-#     Updated the request tracker with a failure status and reports the failure to the client via the Kinesis stream.
-
-#     :param correlation_id: The request correlation_id.
-#     :param message: The error message for the failure.
-#     :param request_start_date: An optional start date for the request.
-#     :param request_end_date: An optional end date for the request.
-#     """
-#     error_datetime = datetime.now(timezone.utc)
-#     update_tracker(
-#         correlation_id=correlation_id,
-#         stage=Stage.DECLINED,
-#         event_datetime=error_datetime,
-#         message=message,
-#         request_start_date=request_start_date,
-#         request_end_date=request_end_date,
-#     )
-#     payload = assemble_event_payload(correlation_id, Stage.DECLINED, error_datetime, message)
-#     deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
-
-
 def report_error_to_client(records, message):
     """
     Updated the request tracker with a failure status and reports the failure to the client via the Kinesis stream.
@@ -187,22 +160,6 @@ def report_error(correlation_id, reason, subject_hint=None):
         )
 
 
-# def update_status(response, start, end, correlation_id):
-#     start_date: datetime = response["startDate"]
-#     # logger.info("SM invoked for DLC request. ARN: %s, StartDateTime: %s",
-#     #             response["executionArn"], start_date)
-#     update_tracker(
-#         correlation_id=correlation_id,
-#         stage=Stage.QUEUED,
-#         event_datetime=start_date,
-#         request_start_date=start,
-#         request_end_date=end,
-#     )
-#     # payload = assemble_event_payload(correlation_id, Stage.QUEUED,
-#     #                                  start_date)
-#     # deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
-
-
 def update_status(response, request):
     start_date: datetime = response["startDate"]
     logger.info(
@@ -247,7 +204,6 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
     :param end: The end of the DLC request.
     :param request: The DLC request.
     """
-
     step_function_client = get_step_function_client()
     try:
         logger.info("Starting step function execution id: %s", correlation_id)
@@ -257,9 +213,10 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
         step_function_id = correlation_id
         if not isinstance(correlation_id, str):
             step_function_id = "GRP-" + correlation_id[0]
-        request["action"] = "groupLCRequests"
+
+        req = {"action": "groupLCRequests", "request": request}
         response = sm_handler.initiate(
-            step_function_id, json.dumps(request, cls=JSONEncoder)
+            step_function_id, json.dumps(req, cls=JSONEncoder)
         )
 
         status_code: int = response["ResponseMetadata"]["HTTPStatusCode"]

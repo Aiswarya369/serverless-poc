@@ -790,14 +790,16 @@ def group_contiguous_requests(contiguous_request, current_request):
 
     request_data = {
         "action": "createDLCPolicy",
-        "group_id": current_request.get("group_id"),
-        "status": current_request.get("status"),
-        "start_datetime": current_request.get("start_datetime"),
-        "end_datetime": current_request.get("end_datetime"),
-        "site": [],
-        "switch_addresses": [],
-        "correlation_id": [],
-        "site_switch_crl_id": [],
+        "request": {
+            "group_id": current_request.get("group_id"),
+            "status": current_request.get("status"),
+            "start_datetime": current_request.get("start_datetime"),
+            "end_datetime": current_request.get("end_datetime"),
+            "site": [],
+            "switch_addresses": [],
+            "correlation_id": [],
+            "site_switch_crl_id": [],
+        },
     }
     grouped_data = {}
 
@@ -821,29 +823,31 @@ def group_contiguous_requests(contiguous_request, current_request):
 
                 grouped_data[key] = {
                     "action": "createDLCPolicy",
-                    "policyType": policyType,
-                    "group_id": current_request.get("group_id"),
-                    "status": current_request.get("status"),
-                    "start_datetime": current_request.get("start_datetime"),
-                    "end_datetime": current_request.get("end_datetime"),
-                    "original_start_datetime": existing_record.get(
-                        "original_start_datetime"
-                    ),
-                    "rqstStrtDt": existing_record.get("rqstStrtDt"),
-                    "rqstEndDt": existing_record.get("rqstEndDt"),
-                    "site": [req_record.get("site")],
-                    "switch_addresses": [req_record.get("switch_addresses")],
-                    "correlation_id": [req_record.get("correlation_id")],
-                    "crrltnId": [existing_record.get("crrltnId")],
-                    "site_switch_crl_id": [
-                        {
-                            "site": req_record.get("site"),
-                            "correlation_id": req_record.get("correlation_id"),
-                            "switch_addresses": req_record.get("switch_addresses"),
-                            "crrltnId": existing_record.get("crrltnId"),
-                            "sub_id": req_record.get("sub_id"),
-                        }
-                    ],
+                    "request": {
+                        "policyType": policyType,
+                        "group_id": current_request.get("group_id"),
+                        "status": current_request.get("status"),
+                        "start_datetime": current_request.get("start_datetime"),
+                        "end_datetime": current_request.get("end_datetime"),
+                        "original_start_datetime": existing_record.get(
+                            "original_start_datetime"
+                        ),
+                        "rqstStrtDt": existing_record.get("rqstStrtDt"),
+                        "rqstEndDt": existing_record.get("rqstEndDt"),
+                        "site": [req_record.get("site")],
+                        "switch_addresses": [req_record.get("switch_addresses")],
+                        "correlation_id": [req_record.get("correlation_id")],
+                        "crrltnId": [existing_record.get("crrltnId")],
+                        "site_switch_crl_id": [
+                            {
+                                "site": req_record.get("site"),
+                                "correlation_id": req_record.get("correlation_id"),
+                                "switch_addresses": req_record.get("switch_addresses"),
+                                "crrltnId": existing_record.get("crrltnId"),
+                                "sub_id": req_record.get("sub_id"),
+                            }
+                        ],
+                    },
                 }
 
             else:
@@ -1142,7 +1146,8 @@ def get_bulk_contiguous_request(request: dict):
     if not items:
         logger.info("No contiguous requests found")
         request["action"] = "createDLCPolicy"
-        return [request]
+        resp = {"request": request, "action": "createDLCPolicy"}
+        return [resp]
     if "site_switch_crl_id" not in request:
         contiguous_request = items[0]
         contiguous_request.update(
@@ -1156,10 +1161,11 @@ def get_bulk_contiguous_request(request: dict):
             }
         )
         if request["status"] == request["overrdValue"]:
-            request["action"] = "contiguousExtension"
+            request["policyType"] = "contiguousExtension"
         else:
-            request["action"] = "contiguousCreation"
-        return [contiguous_request]
+            request["policyType"] = "contiguousCreation"
+        resp = {"request": contiguous_request, "action": "createDLCPolicy"}
+        return [resp]
 
     request, contiguous_requests = group_contiguous_requests(items, request)
     request = contiguous_requests + request

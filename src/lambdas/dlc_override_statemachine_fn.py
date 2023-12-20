@@ -602,7 +602,7 @@ def lambda_handler(event: dict, _):
     action: str = event["action"]
     logger.debug("Action supplied: %s", action)
 
-    request: dict = event
+    request = event["request"]
 
     # # Get PolicyNet credentials; set in our PolicyNet client object.
     # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(
