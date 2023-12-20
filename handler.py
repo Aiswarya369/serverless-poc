@@ -8,8 +8,8 @@ for i in range(1, 2):
     payload = json.dumps(
         {
             "site": "AJ0000000{}".format(i),
-            "start_datetime": "2023-12-20T07:30:00+00:00",
-            "end_datetime": "2023-12-20T07:45:00+00:00",
+            "start_datetime": "2023-12-20T09:30:00+00:00",
+            "end_datetime": "2023-12-20T09:45:00+00:00",
             "status": "ON",
             "switch_addresses": "LG02210255{}".format(i),
             "group_id": "G1",

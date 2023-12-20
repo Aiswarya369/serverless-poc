@@ -884,7 +884,7 @@ def group_contiguous_requests(contiguous_request, current_request):
                 }
             )
 
-    return [request_data] if len(request_data["site"]) > 1 else [], list(
+    return [request_data] if len(request_data["request"]["site"]) > 1 else [], list(
         grouped_data.values()
     )
 
