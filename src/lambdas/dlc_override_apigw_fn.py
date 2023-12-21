@@ -13,7 +13,11 @@ from aws_lambda_powertools import Tracer
 from botocore.client import BaseClient
 from msi_common import Stage
 
-from cresconet_aws.support import send_message_to_support, SupportMessage, alert_on_exception
+from cresconet_aws.support import (
+    send_message_to_support,
+    SupportMessage,
+    alert_on_exception,
+)
 from src.utils.aws_utils import send_sqs_message
 from src.config.config import AppConfig
 
@@ -175,6 +179,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     # Get stuff from incoming request.
     request: dict = json.loads(event["body"])
     subscription_id: str = event["pathParameters"]["subscription_id"]  # Always exists.
+    request["sub_id"]: str = subscription_id
 
     # Validate the request.
     errors = RequestValidator.validate_dlc_override_request(
@@ -192,7 +197,6 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         }
 
         return format_response(HTTPStatus.BAD_REQUEST, error_details)
-
     # We have a valid request.
     #
     # Before we do anything else, we need to create our correlation id and store it in our request.
@@ -206,7 +210,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
 
     # There should only be one meter serial supplied in "switch_addresses", as per validation.
     switch_addresses: Union[str, List[str]] = request["switch_addresses"]
-    meter_serial_number: str = (
+    request["switch_addresses"] = (
         switch_addresses[0] if type(switch_addresses) == list else switch_addresses
     )
 
@@ -219,14 +223,15 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         correlation_id=correlation_id,
         sub_id=subscription_id,
         request_site=site,
-        serial_no=meter_serial_number,
+        serial_no=request["switch_addresses"],
         override=override_status,
+        group_id=request.get("group_id", None),
     )
-
     # Validate the subscription.
     _, subscription_errors = RequestValidator.validate_subscription(
         subscription_id, LOAD_CONTROL_SERVICE_NAME
     )
+    # todo
     if subscription_errors:
         logger.debug("Subscription errors: %s", subscription_errors)
         report_errors(correlation_id, now, subscription_errors)
@@ -286,7 +291,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any):
     :returns: A http response.
     """
     try:
-        logger.info("Performing direct Load Control API override")
+        logger.info("Lambda to perform direct Load Control API override being run now")
         logger.debug(f"Event: %s", str(event))
         return job_entry(event)
     except Exception as e:
