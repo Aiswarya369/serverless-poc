@@ -992,8 +992,7 @@ def get_contiguous_request(request: dict):
                 # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
                 # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
                 response: dict = ddb_table.scan(
-                    AttributesToGet=["overrdValue", "original_start_datetime",
-                    "rqstStrtDt", "rqstEndDt", "crrltnId"],
+                    ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId",
                     TableName=REQUEST_TRACKER_TABLE_NAME,
                     FilterExpression=Key("GSI3SK").eq(gsi3sk)
                     & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
@@ -1004,8 +1003,7 @@ def get_contiguous_request(request: dict):
             else:
                 # This only runs the first time - provide no ExclusiveStartKey initially.
                 response: dict = ddb_table.scan(
-                    AttributesToGet=["overrdValue", "original_start_datetime",
-                    "rqstStrtDt", "rqstEndDt", "crrltnId"],
+                    ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId",
                     IndexName="GSI3",
                     FilterExpression=Key("GSI3SK").eq(gsi3sk)
                     & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
