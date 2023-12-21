@@ -1151,11 +1151,11 @@ def get_bulk_contiguous_request(request: dict):
         contiguous_request = items[0]
         contiguous_request.update(
             {
-                "correlation_id": request["correlation_id"],
-                "start_datetime": request["start_datetime"],
-                "end_datetime": request["end_datetime"],
-                "status": request["status"],
-                "switch_addresses": request["switch_addresses"],
+                "correlation_id": request.get("correlation_id", None),
+                "start_datetime": request.get("start_datetime", None),
+                "end_datetime": request.get("end_datetime", None),
+                "status": request.get("status", None),
+                "switch_addresses": request.get("switch_addresses", None),
             }
         )
         if contiguous_request["status"] == contiguous_request["overrdValue"]:
