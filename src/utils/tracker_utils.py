@@ -1038,6 +1038,7 @@ def get_contiguous_request(request: dict):
                 "end_datetime": request.get("end_datetime", None),
                 "status": request.get("status", None),
                 "switch_addresses": request.get("switch_addresses", None),
+                "site": request.get("site", None),
             }
         )
         if contiguous_request["status"] == contiguous_request["overrdValue"]:
