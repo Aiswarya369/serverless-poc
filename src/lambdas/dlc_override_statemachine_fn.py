@@ -272,6 +272,8 @@ def extend_policy_update_tracker(
                 request_start_date=new_start,
                 request_end_date=new_end,
                 extends=contiguous_correlation_id,
+                original_start_datetime=datetime.fromisoformat(
+                    request['original_start_datetime'])
             )
 
             # Send to Kinesis.
