@@ -148,6 +148,9 @@ def process_request(event: dict) -> dict:
         header_record: dict = get_header_record(correlation_id)
         if not header_record:
             raise InvalidRequest(f"Correlation id {correlation_id} not found")
+        
+        if header_record.get('group_id', None):
+            raise InvalidRequest(f"Correlation id {correlation_id} is a part of group dispatch and cannot be canceled")
 
         request_subscription_id = header_record["subId"]
         if provided_subscription_id != request_subscription_id:
