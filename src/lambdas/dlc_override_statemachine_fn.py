@@ -26,7 +26,7 @@ from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.request_validator import RequestValidator
 from src.utils.tracker_utils import (
     update_tracker,
-    get_bulk_contiguous_request,
+    get_contiguous_request,
     bulk_update_records,
 )
 
@@ -273,7 +273,8 @@ def extend_policy_update_tracker(
                 request_end_date=new_end,
                 extends=contiguous_correlation_id,
                 original_start_datetime=datetime.fromisoformat(
-                    request['original_start_datetime'])
+                    request["original_start_datetime"]
+                ),
             )
 
             # Send to Kinesis.
@@ -626,7 +627,7 @@ def lambda_handler(event: dict, _):
     #     logger.debug("Set credentials in PolicyNet client")
 
     if action == SupportedOverrideSMActions.GROUP_DLC_REQUESTS.value:
-        response = get_bulk_contiguous_request(request)
+        response = get_contiguous_request(request)
     elif action == SupportedOverrideSMActions.CREATE_DLC_POLICY.value:
         response = handle_create_policy(request)
     elif action == SupportedOverrideSMActions.DEPLOY_DLC_POLICY.value:
