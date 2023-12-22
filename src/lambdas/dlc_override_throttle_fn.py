@@ -92,6 +92,8 @@ def report_error_to_client(records, message):
     :param request_end_date: An optional end date for the request.
     """
     error_datetime = datetime.now(timezone.utc)
+    request_start_date = datetime.fromisoformat(records["start_datetime"])
+    request_end_date = datetime.fromisoformat(records["end_datetime"])
     if "site_switch_crl_id" in records:
         bulk_update_records(records, Stage.DECLINED, error_datetime, message=message)
         return
@@ -100,8 +102,8 @@ def report_error_to_client(records, message):
         stage=Stage.DECLINED,
         event_datetime=error_datetime,
         message=message,
-        request_start_date=records["start_datetime"],
-        request_end_date=records["end_datetime"],
+        request_start_date=request_start_date,
+        request_end_date=request_end_date,
     )
     payload = assemble_event_payload(
         records["correlation_id"], Stage.DECLINED, error_datetime, message
