@@ -113,7 +113,7 @@ def create_policy_update_tracker(
 ):
     status_code: int = response["statusCode"]
     message: str = response["message"]
-    policy_id: int = response["policyID"]
+    
     now: datetime = event_datetime
     correlation_id = request["correlation_id"]
     start_datetime = datetime.fromisoformat(request["start_datetime"])
@@ -121,7 +121,7 @@ def create_policy_update_tracker(
 
     if status_code == HTTP_SUCCESS:
         # Policy id may not have been returned in a non-success scenario.
-
+        policy_id: int = response["policyID"]
         # Update tracker.
         if "site_switch_crl_id" in request:
             bulk_update_records(
@@ -151,8 +151,7 @@ def create_policy_update_tracker(
                 Stage.POLICY_CREATED,
                 now,
                 message=message,
-                policy_name=policy_name,
-                policy_id=policy_id,
+                policy_name=policy_name
             )
             update_tracker(
                 correlation_id=correlation_id,
