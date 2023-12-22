@@ -669,16 +669,16 @@ def bulk_update_header_records(
                     "updateDt": event_datetime.isoformat(),
                 }
             )
-
             if policy_id:
                 item.update(
                     {
                         "plcyId": policy_id,
                         "GSI4PK": f"{GSI4PK_PREFIX}{HeadEnd.POLICYNET}",
                         "GSI4SK": f"{GSI4SK_PREFIX}{policy_id}",
-                        "plcyName": policy_name,
                     }
                 )
+            if policy_name:
+                item["plcyName"] = policy_name
             if stage.value == "EXTENDS":
                 item["extnds"] = site_switch_crl_ids[item["mtrSrlNo"]]["crrltnId"]
             if stage.value == "EXTENDED_BY":
@@ -992,8 +992,8 @@ def get_contiguous_request(request: dict):
                 # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
                 # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
                 response: dict = ddb_table.scan(
-                    ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId",
-                    TableName=REQUEST_TRACKER_TABLE_NAME,
+                    ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
+                    IndexName="GSI3",
                     FilterExpression=Key("GSI3SK").eq(gsi3sk)
                     & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
                     & Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
@@ -1003,7 +1003,7 @@ def get_contiguous_request(request: dict):
             else:
                 # This only runs the first time - provide no ExclusiveStartKey initially.
                 response: dict = ddb_table.scan(
-                    ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId",
+                    ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
                     FilterExpression=Key("GSI3SK").eq(gsi3sk)
                     & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
