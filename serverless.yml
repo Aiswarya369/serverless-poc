@@ -126,13 +126,13 @@ functions:
     timeout: 25 # optional, in seconds, default is 6
     events:
       - http:
-          path: /service/lc/cancel/{sub_id}
+          path: /service/lc/cancel/{subscription_id}
           method: delete
           integration: lambda-proxy
           request:
             parameters:
               paths:
-                sub_id: true
+                subscription_id: true
               querystrings:
                 correlation_id: true
                 subscriber: true
