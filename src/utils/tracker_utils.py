@@ -615,8 +615,8 @@ def bulk_update_header_records(
     policy_id: int = None,
     policy_name: str = None,
     original_start_datetime=None,
-    request_start_date=None,
-    request_end_date=None,
+    request_start_date: datetime = None,
+    request_end_date: datetime = None,
 ):
     pk = []
     sk = []
@@ -708,8 +708,8 @@ def bulk_update_records(
     policy_name: str = None,
     message: str = "",
     original_start_datetime=None,
-    request_start_date=None,
-    request_end_date=None,
+    request_start_date: datetime = None,
+    request_end_date: datetime = None,
 ):
     no_stages = bulk_update_header_records(
         records,
@@ -855,11 +855,13 @@ def group_contiguous_requests(contiguous_request, current_request):
                 correlation_id = req_record.get("correlation_id")
                 switch_addresses = req_record.get("switch_addresses")
                 crrltn_id = existing_record.get("crrltnId")
-                grouped_data[key]["site"].append(site)
-                grouped_data[key]["switch_addresses"].append(switch_addresses)
-                grouped_data[key]["correlation_id"].append(correlation_id)
-                grouped_data[key]["crrltnId"].append(crrltn_id)
-                grouped_data[key]["site_switch_crl_id"].append(
+                grouped_data[key]["request"]["site"].append(site)
+                grouped_data[key]["request"]["switch_addresses"].append(
+                    switch_addresses
+                )
+                grouped_data[key]["request"]["correlation_id"].append(correlation_id)
+                grouped_data[key]["request"]["crrltnId"].append(crrltn_id)
+                grouped_data[key]["request"]["site_switch_crl_id"].append(
                     {
                         "site": site,
                         "correlation_id": correlation_id,
@@ -872,10 +874,10 @@ def group_contiguous_requests(contiguous_request, current_request):
             site = req_record.get("site")
             correlation_id = req_record.get("correlation_id")
             switch_addresses = req_record.get("switch_addresses")
-            request_data["site"].append(site)
-            request_data["switch_addresses"].append(switch_addresses)
-            request_data["correlation_id"].append(correlation_id)
-            request_data["site_switch_crl_id"].append(
+            request_data["request"]["site"].append(site)
+            request_data["request"]["switch_addresses"].append(switch_addresses)
+            request_data["request"]["correlation_id"].append(correlation_id)
+            request_data["request"]["site_switch_crl_id"].append(
                 {
                     "site": site,
                     "correlation_id": correlation_id,
@@ -884,7 +886,7 @@ def group_contiguous_requests(contiguous_request, current_request):
                 }
             )
 
-    return [request_data] if len(request_data["request"]["site"]) > 1 else [], list(
+    return [request_data] if len(request_data["request"]["site"]) > 0 else [], list(
         grouped_data.values()
     )
 
@@ -931,7 +933,7 @@ def bulk_is_request_pending_state_machine(requests):
     return False
 
 
-def get_contiguous_request(request: dict):
+def get_contiguous_request(request: dict, cancel_req=False):
     """
     Get any Load Control requests which have already been deployed that are contiguous to the supplied request.
 
@@ -962,7 +964,7 @@ def get_contiguous_request(request: dict):
     # - service: Load Control
     # - the latest status is POLICY_CREATED, POLICY_EXTENDED, POLICY_DEPLOYED or DLC_OVERRIDE_STARTED
     # - end date of period = this request's start date
-    if not isinstance(switch_addresses, str):
+    if "site_switch_crl_id" in request:
         item_len = len(request["site_switch_crl_id"])
         if item_len % 100 != 0:
             item_len += 100
@@ -1028,7 +1030,7 @@ def get_contiguous_request(request: dict):
     if not items:
         logger.info("No contiguous requests found")
         resp = {"request": request, "action": "createDLCPolicy"}
-        return [resp]
+        return None if cancel_req else [resp]
     if "site_switch_crl_id" not in request:
         contiguous_request = items[0]
         contiguous_request.update(
@@ -1046,7 +1048,7 @@ def get_contiguous_request(request: dict):
         elif contiguous_request["status"] != contiguous_request["overrdValue"]:
             contiguous_request["policyType"] = "contiguousCreation"
         resp = {"request": contiguous_request, "action": "createDLCPolicy"}
-        return [resp]
+        return resp if cancel_req else [resp]
 
     request, contiguous_requests = group_contiguous_requests(items, request)
     request = contiguous_requests + request

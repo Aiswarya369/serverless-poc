@@ -32,8 +32,8 @@ from src.utils.kinesis_utils import deliver_to_kinesis
 from src.utils.tracker_utils import (
     update_tracker,
     is_request_pending_state_machine,
-    bulk_update_records,
     bulk_is_request_pending_state_machine,
+    bulk_update_records,
 )
 
 # Environmental variables
@@ -92,8 +92,16 @@ def report_error_to_client(records, message):
     :param request_end_date: An optional end date for the request.
     """
     error_datetime = datetime.now(timezone.utc)
-    request_start_date = datetime.fromisoformat(records["start_datetime"])
-    request_end_date = datetime.fromisoformat(records["end_datetime"])
+    request_start_date = (
+        datetime.fromisoformat(records["start_datetime"])
+        if records["start_datetime"]
+        else None
+    )
+    request_end_date = (
+        datetime.fromisoformat(records["end_datetime"])
+        if records["end_datetime"]
+        else None
+    )
     if "site_switch_crl_id" in records:
         bulk_update_records(records, Stage.DECLINED, error_datetime, message=message)
         return
@@ -311,7 +319,7 @@ def group_records(event):
     :param event: The sqs events.
     """
 
-    data = [ast.literal_eval(i["body"]) for i in event["Records"]]
+    data = [ast.literal_eval(i["body"]) for i in event["Records"] if i is not None]
     nan_records = []
 
     grouped_records = {}
@@ -319,9 +327,9 @@ def group_records(event):
     for record in data:
         group_id = record.get("group_id")
 
-        if group_id is None:
+        if group_id is None:  # Requests with no group_id
             nan_records.append(record)
-        else:
+        else:  # Requests with group_id
             key = (
                 group_id,
                 record.get("status"),
@@ -344,11 +352,9 @@ def group_records(event):
             switch_addresses = record.get("switch_addresses")
             site = record.get("site")
             correlation_id = record.get("correlation_id")
-            grouped_records[key]["switch_addresses"].append(
-                record.get("switch_addresses")
-            )
-            grouped_records[key]["site"].append(record.get("site"))
-            grouped_records[key]["correlation_id"].append(record.get("correlation_id"))
+            grouped_records[key]["switch_addresses"].append(switch_addresses)
+            grouped_records[key]["site"].append(site)
+            grouped_records[key]["correlation_id"].append(correlation_id)
             grouped_records[key]["site_switch_crl_id"].append(
                 {
                     "site": site,
@@ -363,12 +369,11 @@ def group_records(event):
     return grouped_records_list + nan_records
 
 
-# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+# @alert_on_exception(
+#     tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
+# )
 # @tracer.capture_lambda_handler
 def lambda_handler(event: Dict[str, Any], context: LambdaContext):
-    """
-    Expecting event contain list of record and max number of records is 1000
-    """
     """
     The lambda entry point.
 
@@ -380,7 +385,6 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
         result = list(map(record_handler, group_records(event)))
         # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
         #                                   context=context)
-
         logger.info("Throttle result : %s", result)
         end_time = time.time()
 

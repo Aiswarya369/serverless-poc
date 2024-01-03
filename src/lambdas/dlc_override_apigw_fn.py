@@ -179,7 +179,6 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     # Get stuff from incoming request.
     request: dict = json.loads(event["body"])
     subscription_id: str = event["pathParameters"]["subscription_id"]  # Always exists.
-    request["sub_id"]: str = subscription_id
 
     # Validate the request.
     errors = RequestValidator.validate_dlc_override_request(
@@ -201,6 +200,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     #
     # Before we do anything else, we need to create our correlation id and store it in our request.
     now: datetime = datetime.now(tz=timezone.utc)
+    request["sub_id"]: str = subscription_id
     site: str = request["site"]
     correlation_id = create_correlation_id(site, now)
     request["correlation_id"] = correlation_id
@@ -280,7 +280,9 @@ def create_correlation_id(site: str, now: datetime) -> str:
     return correlation_id
 
 
-# @alert_on_exception(tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE)
+# @alert_on_exception(
+#     tags=AppConfig.LOAD_CONTROL_TAGS, service_name=LOAD_CONTROL_ALERT_SOURCE
+# )
 # @tracer.capture_lambda_handler
 def lambda_handler(event: Dict[str, Any], _context: Any):
     """
