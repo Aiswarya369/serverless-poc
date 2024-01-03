@@ -113,7 +113,7 @@ def create_policy_update_tracker(
 ):
     status_code: int = response["statusCode"]
     message: str = response["message"]
-    
+
     now: datetime = event_datetime
     correlation_id = request["correlation_id"]
     start_datetime = datetime.fromisoformat(request["start_datetime"])
@@ -131,6 +131,8 @@ def create_policy_update_tracker(
                 message=message,
                 policy_name=policy_name,
                 policy_id=policy_id,
+                request_start_date=start_datetime,
+                request_end_date=end_datetime,
             )
         else:
             update_tracker(
@@ -148,11 +150,14 @@ def create_policy_update_tracker(
         if "site_switch_crl_id" in request:
             bulk_update_records(
                 request,
-                Stage.POLICY_CREATED,
+                Stage.DECLINED,
                 now,
                 message=message,
-                policy_name=policy_name
+                policy_name=policy_name,
+                request_start_date=start_datetime,
+                request_end_date=end_datetime,
             )
+        else:
             update_tracker(
                 correlation_id=correlation_id,
                 stage=Stage.DECLINED,
@@ -606,24 +611,25 @@ def lambda_handler(event: dict, _):
 
     request = event["request"]
 
-    # # Get PolicyNet credentials; set in our PolicyNet client object.
-    # pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(
-    #     AppConfig.PNET_AUTH_DETAILS_SECRET_ID
-    # )
+    # if action != SupportedOverrideSMActions.GROUP_DLC_REQUESTS.value:
+    #     # Get PolicyNet credentials; set in our PolicyNet client object.
+    #     pnet_auth_details: dict = cn_secret_manager.get_secret_value_dict(
+    #         AppConfig.PNET_AUTH_DETAILS_SECRET_ID
+    #     )
 
-    # if not policynet_client:
-    #     url = pnet_auth_details["pnet_url"]
-    #     policynet_client = PolicyNetClient(
-    #         f"{url}/PolicyNet.wsdl",
-    #         url,
-    #         DYNAMO_RESOURCE,
-    #         session_table=PNET_SESSION_TABLE,
-    #         session_lifetime=PNET_SESSION_LIFETIME_SECONDS,
-    #     )
-    #     policynet_client.set_credentials(
-    #         pnet_auth_details["pnet_username"], pnet_auth_details["pnet_password"]
-    #     )
-    #     logger.debug("Set credentials in PolicyNet client")
+    #     if not policynet_client:
+    #         url = pnet_auth_details["pnet_url"]
+    #         policynet_client = PolicyNetClient(
+    #             f"{url}/PolicyNet.wsdl",
+    #             url,
+    #             DYNAMO_RESOURCE,
+    #             session_table=PNET_SESSION_TABLE,
+    #             session_lifetime=PNET_SESSION_LIFETIME_SECONDS,
+    #         )
+    #         policynet_client.set_credentials(
+    #             pnet_auth_details["pnet_username"], pnet_auth_details["pnet_password"]
+    #         )
+    #         logger.debug("Set credentials in PolicyNet client")
 
     if action == SupportedOverrideSMActions.GROUP_DLC_REQUESTS.value:
         response = get_contiguous_request(request)
