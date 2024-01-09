@@ -45,6 +45,7 @@ OVERRIDE_THROTTLING_QUEUE = os.environ.get(
     "OVERRIDE_THROTTLING_QUEUE", "load-control-throttle-queue"
 )
 
+
 # X-ray tracer.
 tracer: Tracer = Tracer(service="dlc")
 
@@ -178,7 +179,8 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
 
     # Get stuff from incoming request.
     request: dict = json.loads(event["body"])
-    subscription_id: str = event["pathParameters"]["subscription_id"]  # Always exists.
+    # Always exists.
+    subscription_id: str = event["pathParameters"]["subscription_id"]
 
     # Validate the request.
     errors = RequestValidator.validate_dlc_override_request(
@@ -198,27 +200,34 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         return format_response(HTTPStatus.BAD_REQUEST, error_details)
     # We have a valid request.
     #
-    # Before we do anything else, we need to create our correlation id and store it in our request.
+    # Before we do anything else, we need to create our correlation id and
+    # store it in our request.
     now: datetime = datetime.now(tz=timezone.utc)
-    request["sub_id"]: str = subscription_id
     site: str = request["site"]
     correlation_id = create_correlation_id(site, now)
     request["correlation_id"] = correlation_id
 
-    # Get additional details from the request now that it has passed validation.
+    # subscription_id from the pathparameter is added to the request
+    request["sub_id"]: str = subscription_id
+
+    # Get additional details from the request now that it has passed
+    # validation.
     override_status: str = request["status"]
 
-    # There should only be one meter serial supplied in "switch_addresses", as per validation.
+    # There should only be one meter serial supplied in "switch_addresses", as
+    # per validation.
     switch_addresses: Union[str, List[str]] = request["switch_addresses"]
     request["switch_addresses"] = (
-        switch_addresses[0] if type(switch_addresses) == list else switch_addresses
+        switch_addresses[0] if isinstance(switch_addresses, list) else switch_addresses
     )
 
     # Create initial request tracker records.
     # We can't add the request start and end dates to the tracker header record here because we need to validate
     # them first prior to parsing to datetime objects, which we do below.
     # They will be added when we initiate the Step Function.
-    # Override status can be added, even it is incorrect (the validation will identify if so).
+    # Override status can be added, even it is incorrect (the validation will
+    # identify if so).
+    # group_id is added to the header record f its a part of group dispatch
     create_tracker(
         correlation_id=correlation_id,
         sub_id=subscription_id,
@@ -246,7 +255,8 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     # Validate whether the request either overlaps or is a duplicate.
     # This is implemented as a separate function, rather than in validate_dlc_override_request(), because that
     # function gets called twice: once here and again when the Step Function deploys the policy.
-    # In order to minimise calls on the tracker database, we just check once for overlaps (i.e. here).
+    # In order to minimise calls on the tracker database, we just check once
+    # for overlaps (i.e. here).
     duration_errors = RequestValidator.validate_request_duration(
         request, DEFAULT_OVERRIDE_DURATION_MINUTES
     )

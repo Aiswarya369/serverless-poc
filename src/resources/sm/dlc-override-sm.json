@@ -60,16 +60,11 @@
                         "Next": "Internal Fail"
                       }
                     ],
-                    "Default": "Policy Deployment Wait"
+                    "Default": "Deploy LC Override Policy"
                   },
                   "Internal Fail": {
                     "Type": "Pass",
                     "End": true
-                  },
-                  "Policy Deployment Wait": {
-                    "Type": "Wait",
-                    "TimestampPath": "$.Payload.deploy_start_datetime",
-                    "Next": "Deploy LC Override Policy"
                   },
                   "Deploy LC Override Policy": {
                     "Type": "Task",

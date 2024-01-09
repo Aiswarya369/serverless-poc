@@ -33,7 +33,7 @@ from src.utils.tracker_utils import (
     update_tracker,
     is_request_pending_state_machine,
     bulk_is_request_pending_state_machine,
-    bulk_update_records,
+    bulk_update_tracker,
 )
 
 # Environmental variables
@@ -103,7 +103,7 @@ def report_error_to_client(records, message):
         else None
     )
     if "site_switch_crl_id" in records:
-        bulk_update_records(records, Stage.DECLINED, error_datetime, message=message)
+        bulk_update_tracker(records, Stage.DECLINED, error_datetime, message=message)
         return
     update_tracker(
         correlation_id=records["correlation_id"],
@@ -170,7 +170,13 @@ def report_error(correlation_id, reason, subject_hint=None):
         )
 
 
-def update_status(response, request):
+def update_status(response, request) -> None:
+    """
+    Update record stages if state machine initiation is success.
+
+    :param response: The response from state machine.
+    :param request: The DLC request.
+    """
     start_date: datetime = response["startDate"]
     logger.info(
         "SM invoked for DLC request. ARN: %s, StartDateTime: %s",
@@ -181,7 +187,7 @@ def update_status(response, request):
     request_start_date = datetime.fromisoformat(request["start_datetime"])
     request_end_date = datetime.fromisoformat(request["end_datetime"])
     if "site_switch_crl_id" in request:
-        bulk_update_records(
+        bulk_update_tracker(
             request,
             Stage.QUEUED,
             start_date,
@@ -220,11 +226,17 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
         sm_handler = StateMachineHandler(
             step_function_client, AppConfig.DLC_OVERRIDE_SM_ARN
         )
+
         step_function_id = correlation_id
+
+        # if its a group dispatch,
+        # assigns the value of first correlation_id in the request prefixed with "GRP-" for step_function_id.
         if not isinstance(correlation_id, str):
             step_function_id = "GRP-" + correlation_id[0]
 
+        # "action" with "groupLCRequests" is appended along with the actual request.
         req = {"action": "groupLCRequests", "request": request}
+
         response = sm_handler.initiate(
             step_function_id, json.dumps(req, cls=JSONEncoder)
         )
@@ -260,16 +272,6 @@ def initiate_step_function(correlation_id, request: Dict[str, Any]):
         )
 
 
-def remove_processed_records(obj):
-    if is_request_pending_state_machine(obj["correlation_id"]):
-        return obj, obj["site"], obj["switch_addresses"], obj["correlation_id"]
-    else:
-        logger.info(
-            "Request with matching correlation id: %s, has already been processed.",
-            obj["correlation_id"],
-        )
-
-
 @RateLimiter(max_calls=RATE_LIMIT_CALLS, period=RATE_LIMIT_PERIOD_SEC)
 def record_handler(record):
     """
@@ -283,14 +285,23 @@ def record_handler(record):
     :param record: The SQS record.
     """
 
+    # Checks whether the request is a part of group dispatch or not
+    # If group dispatch uses the function bulk_is_request_pending_state_machine else is_request_pending_state_machine
     if not isinstance(record["correlation_id"], str):
         if not bulk_is_request_pending_state_machine(record):
+            logger.info(
+                "All correlation ids in the request has already been processed."
+            )
             return
     else:
         if not is_request_pending_state_machine(record["correlation_id"]):
+            logger.info(
+                "Request with matching correlation id: %s, has already been processed.",
+                record["correlation_id"],
+            )
             return
 
-    request_start, request_end = update_start_end_times_on_request(record)
+    _, request_end = update_start_end_times_on_request(record)
 
     if request_end <= datetime.now(tz=timezone.utc):
         logger.error(
@@ -352,9 +363,11 @@ def group_records(event):
             switch_addresses = record.get("switch_addresses")
             site = record.get("site")
             correlation_id = record.get("correlation_id")
-            grouped_records[key]["switch_addresses"].append(switch_addresses)
-            grouped_records[key]["site"].append(site)
-            grouped_records[key]["correlation_id"].append(correlation_id)
+            grouped_records[key]["switch_addresses"].append(
+                record.get("switch_addresses")
+            )
+            grouped_records[key]["site"].append(record.get("site"))
+            grouped_records[key]["correlation_id"].append(record.get("correlation_id"))
             grouped_records[key]["site_switch_crl_id"].append(
                 {
                     "site": site,
@@ -382,10 +395,9 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
     """
     try:
         start_time = time.time()
-        result = list(map(record_handler, group_records(event)))
-        # result = process_partial_response(event=event, record_handler=record_handler, processor=processor,
-        #                                   context=context)
-        logger.info("Throttle result : %s", result)
+
+        # Each request from the response of group_records is passed to record handler which is rate limited
+        list(map(record_handler, group_records(event)))
         end_time = time.time()
 
         expected_runtime = int(
@@ -394,6 +406,10 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext):
         processing_time = int(round(end_time - start_time))
         if processing_time < expected_runtime:
             time.sleep(RATE_LIMIT_PERIOD_SEC - processing_time)
+
+        # All failures are captured through exception handling
+        # Since report batch item failures of sqs trigger is enabled the response should be in the below format
+        # Otherwise single failure re-triggers the entire batch
         return {"batchItemFailures": []}
     except Exception as e:
         logger.exception(

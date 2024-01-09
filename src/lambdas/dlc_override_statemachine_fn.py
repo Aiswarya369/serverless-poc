@@ -18,7 +18,6 @@ from src.utils.client import (
     deploy_policy,
     replace_lc_override_schedule_policy,
 )
-
 from src.config.config import AppConfig
 from src.lambdas.dlc_event_helper import assemble_error_message, assemble_event_payload
 from src.model.sm_actions import SupportedOverrideSMActions
@@ -27,7 +26,7 @@ from src.utils.request_validator import RequestValidator
 from src.utils.tracker_utils import (
     update_tracker,
     get_contiguous_request,
-    bulk_update_records,
+    bulk_update_tracker,
 )
 
 logging.basicConfig(
@@ -69,7 +68,8 @@ tracer: Tracer = Tracer(service="dlc")
 DYNAMO_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)
 
 # PolicyNet client as a global variable.
-# This avoids creating it every time the lambda is being called as it takes time to load up the WSDL.
+# This avoids creating it every time the lambda is being called as it
+# takes time to load up the WSDL.
 # policynet_client: Optional[PolicyNetClient] = None
 
 
@@ -77,15 +77,16 @@ def report_errors(request, errors):
     """
     Report validation errors.
 
-    :param correlation_id:
+    :param request:
     :param errors:
     :return:
     """
-    # message: str = assemble_error_message(errors)
-    message: str = "assemble_error_message(errors)"
+    message: str = assemble_error_message(errors)
     now: datetime = datetime.now(timezone.utc)
+
+    # In case of errors if grouped request bulk_update_tracker is used and else update_tracker is used to update
     if "site_switch_crl_id" in request:
-        bulk_update_records(request, Stage.DECLINED, now, message=message)
+        bulk_update_tracker(request, Stage.DECLINED, now, message=message)
         return
     # Update tracker.
     update_tracker(
@@ -100,12 +101,6 @@ def report_errors(request, errors):
         request["correlation_id"], Stage.DECLINED, now, message
     )
     deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
-
-    # return {
-    #     "statusCode": HTTP_BAD_REQUEST,
-    #     "message": "Invalid request",
-    #     "errorDetails": [e.error for e in errors],
-    # }
 
 
 def create_policy_update_tracker(
@@ -124,7 +119,7 @@ def create_policy_update_tracker(
         policy_id: int = response["policyID"]
         # Update tracker.
         if "site_switch_crl_id" in request:
-            bulk_update_records(
+            bulk_update_tracker(
                 request,
                 Stage.POLICY_CREATED,
                 now,
@@ -148,7 +143,7 @@ def create_policy_update_tracker(
     else:
         # Update tracker.
         if "site_switch_crl_id" in request:
-            bulk_update_records(
+            bulk_update_tracker(
                 request,
                 Stage.DECLINED,
                 now,
@@ -195,6 +190,9 @@ def create_policy(request: dict) -> dict:
     turn_off: bool = False if request["status"] == "ON" else True
     replace: bool = request["replace"]
 
+    # group_id to be added in the policy name if its a part of group dispatch
+    group_id: str = request["group_id"] if "group_id" in request else None
+
     # Create policy.
     # The response from PolicyNet doesn't include anything useful, so we'll have to be "as near as"
     # with event datetimes.
@@ -236,7 +234,7 @@ def extend_policy_update_tracker(
         contiguous_correlation_id: str = request["crrltnId"]
         extend_message: str = f"Request {contiguous_correlation_id} has been extended by request {correlation_id}"
         if "site_switch_crl_id" in request:
-            bulk_update_records(request, Stage.EXTENDED_BY, now)
+            bulk_update_tracker(request, Stage.EXTENDED_BY, now)
         else:
             update_tracker(
                 correlation_id=contiguous_correlation_id,
@@ -254,12 +252,13 @@ def extend_policy_update_tracker(
             )
             deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
-        # 2. Update the new request to indicate that it is extending a previous request.
+        # 2. Update the new request to indicate that it is extending a previous
+        # request.
         extend_message = (
             f"Request {correlation_id} extends request {contiguous_correlation_id}"
         )
         if "site_switch_crl_id" in request:
-            bulk_update_records(
+            bulk_update_tracker(
                 request,
                 Stage.EXTENDS,
                 now,
@@ -287,9 +286,10 @@ def extend_policy_update_tracker(
             )
             deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
-        # 3. Update the new request to say the extension has been successfully applied to PolicyNet.
+        # 3. Update the new request to say the extension has been successfully
+        # applied to PolicyNet.
         if "site_switch_crl_id" in request:
-            bulk_update_records(
+            bulk_update_tracker(
                 request,
                 Stage.POLICY_EXTENDED,
                 now,
@@ -309,7 +309,7 @@ def extend_policy_update_tracker(
     else:
         # Update tracker.
         if "site_switch_crl_id" in request:
-            bulk_update_records(
+            bulk_update_tracker(
                 request, Stage.DECLINED, now, message=message, policy_name=policy_name
             )
         else:
@@ -340,12 +340,7 @@ def extend_policy(request: dict) -> dict:
     """
     logger.info("Extending existing policy in PolicyNet")
 
-    # terminal_start: datetime = datetime.fromisoformat(terminal_request["rqstStrtDt"])
-    # terminal_end: datetime = datetime.fromisoformat(terminal_request["rqstEndDt"])
-    # contiguous_start: datetime = datetime.fromisoformat(
-    #     contiguous_request["rqstStrtDt"]
-    # )
-    # contiguous_end: datetime = datetime.fromisoformat(contiguous_request["rqstEndDt"])
+    # terminal start is being stored in the new field original_start_datetime in the dynamoDb table
     terminal_start: datetime = datetime.fromisoformat(
         request["original_start_datetime"]
     )
@@ -365,6 +360,9 @@ def extend_policy(request: dict) -> dict:
     )
 
     turn_off: bool = False if request["status"] == "ON" else True
+
+    # group_id to be added in the policy name if its a part of group dispatch
+    group_id: str = request["group_id"] if "group_id" in request else None
 
     # Extend existing policy.
     # The response from PolicyNet doesn't include anything useful, so we'll have to be "as near as"
@@ -423,50 +421,17 @@ def handle_create_policy(request: dict) -> dict:
 
     if errors:
         report_errors(request, errors)
-
         return {
             "statusCode": HTTP_BAD_REQUEST,
             "message": "Invalid request",
             "errorDetails": [e.error for e in errors],
         }
     else:
-        # Get request(s) that are previously contiguous to this one.
-        # contiguous_request, terminal_request = get_contiguous_request(request)
-
-        now: datetime = datetime.now(timezone.utc)
-        deploy_start_datetime: str = now.strftime(POLICY_DEPLOY_DATETIME_FORMAT)
-        logger.debug(
-            "Default policy deployment start datetime: %s", deploy_start_datetime
-        )
-
-        # Contiguous with the same switch direction
         if "policyType" in request:
+            # Contiguous with the same switch direction
             if request["policyType"] == "contiguousExtension":
-                # logger.debug("Contiguous request: %s", contiguous_request)
-                # logger.debug("Terminal request: %s", terminal_request)
-
                 # Extend policy in PolicyNet.
                 response: dict = extend_policy(request)
-
-                if response["statusCode"] == HTTP_SUCCESS:
-                    # Check to see when we can deploy this policy - if the contiguous policy is currently
-                    # being enforced ("now" between start and end date), we can deploy immediately.
-                    start: datetime = datetime.fromisoformat(request["rqstStrtDt"])
-                    end: datetime = datetime.fromisoformat(request["rqstEndDt"])
-
-                    if not is_being_enforced(start, end, now):
-                        # Policy currently NOT being enforced.
-                        # We need to pause deployment until after the contiguous policy is being enforced.
-                        deploy_start: datetime = start + timedelta(
-                            minutes=CONTIGUOUS_START_BUFFER_MINUTES
-                        )
-                        deploy_start_datetime: str = deploy_start.strftime(
-                            POLICY_DEPLOY_DATETIME_FORMAT
-                        )
-                        logger.info(
-                            "Setting policy deployment start datetime to %s",
-                            deploy_start_datetime,
-                        )
 
             # Contiguous with the opposite switch direction
             elif request["policyType"] == "contiguousCreation":
@@ -483,12 +448,11 @@ def handle_create_policy(request: dict) -> dict:
                 request["replace"] = True
                 response: dict = create_policy(request)
         else:
-            # No contiguous request - create a new stand-alone policy and deploy straight away.
+            # No contiguous request - create a new stand-alone policy and
+            # deploy straight away.
             request["replace"] = False
             response: dict = create_policy(request)
 
-        # Add the policy deployment start datetime.
-        response["deploy_start_datetime"] = deploy_start_datetime
         response["request"] = request
         response.update({"action": "deployDLCPolicy"})
     return response
@@ -513,7 +477,7 @@ def handle_deploy_policy(event: dict):
 
         # Update tracker.
         if "site_switch_crl_id" in request:
-            bulk_update_records(request, Stage.DECLINED, now, message=message)
+            bulk_update_tracker(request, Stage.DECLINED, now, message=message)
             return
         else:
             update_tracker(
@@ -545,7 +509,7 @@ def handle_deploy_policy(event: dict):
     if status_code == HTTP_SUCCESS:
         # Update tracker.
         if "site_switch_crl_id" in request:
-            bulk_update_records(
+            bulk_update_tracker(
                 request,
                 Stage.POLICY_DEPLOYED,
                 now,
@@ -563,7 +527,7 @@ def handle_deploy_policy(event: dict):
     else:
         # Update tracker.
         if "site_switch_crl_id" in request:
-            bulk_update_records(request, Stage.DECLINED, now, message=message)
+            bulk_update_tracker(request, Stage.DECLINED, now, message=message)
         else:
             update_tracker(
                 correlation_id=correlation_id,
@@ -631,6 +595,7 @@ def lambda_handler(event: dict, _):
     #         )
     #         logger.debug("Set credentials in PolicyNet client")
 
+    # action added for getting contiguous records
     if action == SupportedOverrideSMActions.GROUP_DLC_REQUESTS.value:
         response = get_contiguous_request(request)
     elif action == SupportedOverrideSMActions.CREATE_DLC_POLICY.value:

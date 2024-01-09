@@ -33,8 +33,6 @@ REQUEST_TRACKER_TABLE_NAME: str = os.environ.get("REQUEST_TRACKER_TABLE_NAME", "
 DYNAMODB_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)
 REQUEST_TRACKER_TABLE: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
 
-DYNAMODB_CLIENT = boto3.client("dynamodb", region_name=REGION)
-
 # Constants.
 LOAD_CONTROL_SERVICE_NAME: str = "load_control"
 
@@ -50,6 +48,8 @@ GSI3PK_PREFIX: str = "SITE#MTR#"
 GSI3SK_PREFIX: str = "REQUESTENDDATE#"
 GSI4PK_PREFIX: str = "HEADEND#"
 GSI4SK_PREFIX: str = "HEADEND_ID#"
+
+MAX_DISPATCH_COUNT: int = int(os.environ.get("MAX_DISPATCH_COUNT", 100))
 
 
 class TrackerException(Exception):
@@ -75,7 +75,6 @@ def assemble_event_payload(
         str(event_datetime),
         message,
     )
-
     # Get information from tracker record.
     header_record: dict = get_header_record(correlation_id)
     logger.debug(
@@ -98,7 +97,6 @@ def assemble_event_payload(
         milestone=stage,
         event_datetime_str=event_datetime.isoformat(timespec="seconds"),
     )
-
     return payload.as_camelcase_dict()
 
 
@@ -205,43 +203,12 @@ def get_header_record(correlation_id: str) -> Optional[dict]:
     return response.get("Item")
 
 
-def do_batch_get(batch_keys):
-    tries = 0
-    max_tries = 5
-    sleep_time = 1  # Start with 1 second of sleep, then exponentially increase.
-    retrieved = []
-    while tries < max_tries:
-        response = DYNAMODB_CLIENT.batch_get_item(RequestItems=batch_keys)
-        # Collect any retrieved items and retry unprocessed keys.
-        for key in response.get("Responses", []):
-            retrieved += response["Responses"][key]
-        unprocessed = response["UnprocessedKeys"]
-        if len(unprocessed) > 0:
-            batch_keys = unprocessed
-            unprocessed_count = sum(
-                [len(batch_key["Keys"]) for batch_key in batch_keys.values()]
-            )
-            logger.info(
-                "%s unprocessed keys returned. Sleep, then retry.", unprocessed_count
-            )
-            tries += 1
-            if tries < max_tries:
-                logger.info("Sleeping for %s seconds.", sleep_time)
-                time.sleep(sleep_time)
-                sleep_time = min(sleep_time * 2, 32)
-        else:
-            break
-
-    return retrieved
-
-
 def get_bulk_header_record(request):
     """
-    Get request tracker header record for the supplied correlation_id.
-    Will return None if no record found
+    Get request tracker header record for the correlation_ids in the request.
 
     :param correlation_id: the request correlation id to use - aligns with tracker Partition Key.
-    :return: The header record.
+    :return: List of site_switch_crl_map dictionary having stage as RECEIVED.
     """
     logger.debug(
         "Getting header record for correlation id %s", request["correlation_id"]
@@ -257,19 +224,48 @@ def get_bulk_header_record(request):
 
     items = []
     data_len = len(site_switch_crl_ids)
-    # if data_len % 100 != 0:
-    #     data_len += 100
 
-    keys = []
-    for i in range(data_len):
-        keys.append({"PK": {"S": pk[i]}, "SK": {"S": sk[i]}})
-        if i % 5 == 0 or i == data_len:
-            batchKeys = {REQUEST_TRACKER_TABLE_NAME: {"Keys": keys}}
-            response = do_batch_get(batchKeys)
-            keys = []
+    # The maximum number of operands for the IN comparator is 100 in dynamoDB
+    # dynamoDb query cannot be used here since it requires KeyConditionExpression
+    # dynamoDb scan will be used instead
 
-    logger.info("Response Bulk get header:\n%s", response)
+    if data_len % 100 != 0:
+        data_len += 100
+    for i in range(int(data_len / 100)):
+        last_evaluated_key = False
+        while True:
+            if last_evaluated_key:
+                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
+                # which was supplied as part of the previous page's results -
+                # specify as ExclusiveStartKey.
+                response: dict = REQUEST_TRACKER_TABLE.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+                    ExclusiveStartKey=last_evaluated_key,
+                )
+            else:
+                # This only runs the first time - provide no ExclusiveStartKey
+                # initially.
+                response: dict = REQUEST_TRACKER_TABLE.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
+                )
+            # Append retrieved records to our result set.
+            items.extend(response["Items"])
+            if "LastEvaluatedKey" in response:
+                last_evaluated_key = response["LastEvaluatedKey"]
+                logger.debug(
+                    "Last evaluated key: %s - retrieving more records",
+                    last_evaluated_key,
+                )
+            else:
+                break
 
+    # For each item from db, it checks if the value of the
+    # "mtrSrlNo" is present in the "site_switch_crl_map" dictionary. If it is present and the value of
+    # the "currentStg" is not equal to "RECEIVED" then
+    # it removes the corresponding key-value pair from the "site_switch_crl_map" dictionary. Finally, it
+    # returns a list of the values remaining in the "site_switch_crl_map" dictionary.
     for item in items:
         if (
             item["mtrSrlNo"] in site_switch_crl_map
@@ -321,21 +317,22 @@ def update_header_record(
         "#noStages": "noStages",
         "#updateDt": "updateDt",
     }
-
     expression_attribute_values: dict = {
         ":val1": stage.value,
         ":val2": new_stg_no,
         ":val3": event_datetime.isoformat(),
     }
 
-    # The following may be empty, so only add them to the update statement if required.
+    # The following may be empty, so only add them to the update statement if
+    # required.
     if policy_id:
         update_expression = update_expression + ", #plcyId = :val4"
         expression_attribute_names["#plcyId"] = "plcyId"
         expression_attribute_values[":val4"] = policy_id
 
         # PolicyNet policy id is used as the partition key of the Global Secondary Index.
-        # Other head-ends will presumably use this index too for event start/finish derivation.
+        # Other head-ends will presumably use this index too for event
+        # start/finish derivation.
         update_expression += ", #GSI4PK = :val5"
         expression_attribute_names["#GSI4PK"] = "GSI4PK"
         expression_attribute_values[":val5"] = f"{GSI4PK_PREFIX}{HeadEnd.POLICYNET}"
@@ -361,8 +358,8 @@ def update_header_record(
         expression_attribute_values[":val9"] = request_end_date.isoformat(
             timespec="seconds"
         )
-
-        # Request end date is also used as the sort key of the Global Secondary Index.
+        # Request end date is also used as the sort key of the Global Secondary
+        # Index.
         update_expression += ", #GSI3SK = :val10"
         expression_attribute_names["#GSI3SK"] = "GSI3SK"
         expression_attribute_values[
@@ -427,7 +424,7 @@ def update_tracker(
     logger.debug("Update tracker: correlation id %s", correlation_id)
 
     # Get header record.
-    header_record = get_header_record(correlation_id)
+    header_record: dict = get_header_record(correlation_id)
     if header_record is None:
         raise TrackerException(
             f"Could not find DLC tracker 'header' with correlation id: '{correlation_id}'."
@@ -567,18 +564,38 @@ def add_tracker_detail(
 
 
 def bulk_add_tracker_detail(
-    data, stage, no_stages, event_datetime, message, policy_id, policy_name
+    data,
+    stage: Stage,
+    no_stages,
+    event_datetime: datetime,
+    message: str,
+    policy_id: int = None,
+    policy_name: str = None,
 ):
+    """
+    Add detail record to request tracker DynamoDB table for a group dispatch.
+
+    :param data:
+    :param stage: The stage to use
+    :param stg_no: The stage number to use
+    :param event_datetime: event datetime
+    :param message: Message, if applicable
+    :param policy_id: PolicyNet policy id
+    :param policy_name: PolicyNet policy name
+    """
     detail_item: dict = {
         "overrdValue": data.get("overrdValue", data.get("status")),
         "stgName": stage.value,
         "createDt": event_datetime.isoformat(),
         "updateDt": event_datetime.isoformat(),
     }
+
+    # batch writer will automatically handle buffering and sending items in batches
+    # there by speeds up the write operation
     with REQUEST_TRACKER_TABLE.batch_writer() as batch:
         for item in data["site_switch_crl_id"]:
             correlation_id = item["correlation_id"]
-            if stage.value == "EXTENDED_BY":
+            if stage.value == Stage.EXTENDED_BY.value:
                 correlation_id = item["crrltnId"]
                 detail_item[
                     "message"
@@ -607,7 +624,7 @@ def bulk_add_tracker_detail(
 
             if policy_name:
                 detail_item["plcyName"] = policy_name
-            if stage.value == "EXTENDS":
+            if stage.value == Stage.EXTENDS.value:
                 detail_item[
                     "message"
                 ]: str = f"Request {item['correlation_id']} extends request {item['crrltnId']}"
@@ -635,34 +652,66 @@ def bulk_update_header_records(
     request_start_date: datetime = None,
     request_end_date: datetime = None,
 ):
+    """
+    Update header records for all requests in a grouped dispatch.
+
+    :param request: The DLC group request
+    :param stage: The stage to be updated
+    :param event_datetime: The event date time
+    :param policy_id: The policy id from policy net response
+    :param policy_name: The policy name generated
+    :param original_start_datetime: The start date time of the terminal request in contiguous scenario
+    :param request_start_date: The request start datetime
+    :param request_end_date: The request end datetime
+    """
     pk = []
     sk = []
     no_stages = {}
     site_switch_crl_ids = {}
     for site_switch_crl_id in data["site_switch_crl_id"]:
-        if stage.value == "EXTENDED_BY":
+        if stage.value == Stage.EXTENDED_BY.value:
             correlation_id = site_switch_crl_id["crrltnId"]
         else:
             correlation_id = site_switch_crl_id["correlation_id"]
         site_switch_crl_ids[site_switch_crl_id["switch_addresses"]] = site_switch_crl_id
         pk.append(f"{PK_PREFIX}{correlation_id}")
         sk.append(f"{SK_REQUEST_PREFIX}{correlation_id}")
-    table: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
-    
-    items = []
-    data_len = len(site_switch_crl_ids)
 
-    keys = []
-    for i in range(data_len):
-        keys.append({"PK": {"S": pk[i]}, "SK": {"S": sk[i]}})
-        if i % 5 == 0 or i == data_len:
-            batchKeys = {REQUEST_TRACKER_TABLE_NAME: {"Keys": keys}}
-            response = do_batch_get(batchKeys)
-            keys = [] 
-            
-    logger.info("Response Bulk Update Header:\n%s", response)   
-         
-    with table.batch_writer() as batch:
+    items = []
+    data_len = len(data["site_switch_crl_id"])
+
+    # The maximum number of operands for the IN comparator is 100 in dynamoDB
+    # dynamoDb query cannot be used here since it requires KeyConditionExpression
+    # dynamoDb scan will be used instead
+    if data_len % 100 != 0:
+        data_len += 100
+    for i in range(int(data_len / 100)):
+        last_evaluated_key = False
+        while True:
+            if last_evaluated_key:
+                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
+                # which was supplied as part of the previous page's results -
+                # specify as ExclusiveStartKey.
+                response: dict = REQUEST_TRACKER_TABLE.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+                    ExclusiveStartKey=last_evaluated_key,
+                )
+            else:
+                # This only runs the first time - provide no ExclusiveStartKey
+                # initially.
+                response: dict = REQUEST_TRACKER_TABLE.scan(
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
+                )
+            # Append retrieved records to our result set.
+            items.extend(response["Items"])
+            if "LastEvaluatedKey" in response:
+                last_evaluated_key = response["LastEvaluatedKey"]
+                # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
+            else:
+                break
+    with REQUEST_TRACKER_TABLE.batch_writer() as batch:
         for item in items:
             no_stages[item["PK"]] = int(item["noStages"] + 1)
             item.update(
@@ -682,9 +731,9 @@ def bulk_update_header_records(
                 )
             if policy_name:
                 item["plcyName"] = policy_name
-            if stage.value == "EXTENDS":
+            if stage.value == Stage.EXTENDS.value:
                 item["extnds"] = site_switch_crl_ids[item["mtrSrlNo"]]["crrltnId"]
-            if stage.value == "EXTENDED_BY":
+            if stage.value == Stage.EXTENDED_BY.value:
                 item["extnddBy"] = site_switch_crl_ids[item["mtrSrlNo"]][
                     "correlation_id"
                 ]
@@ -703,8 +752,8 @@ def bulk_update_header_records(
     return no_stages
 
 
-def bulk_update_records(
-    records,
+def bulk_update_tracker(
+    request,
     stage: Stage,
     event_datetime: datetime,
     policy_id: int = None,
@@ -714,8 +763,21 @@ def bulk_update_records(
     request_start_date: datetime = None,
     request_end_date: datetime = None,
 ):
+    """
+    Update all records inside a group request.
+
+    :param request: The DLC group request
+    :param stage: The stage to be updated
+    :param event_datetime: The event date time
+    :param policy_id: The policy id from policy net response
+    :param policy_name: The policy name generated
+    :param message: The message from policy net response
+    :param original_start_datetime: The start date time of the terminal request in contiguous scenario
+    :param request_start_date: The request start datetime
+    :param request_end_date: The request end datetime
+    """
     no_stages = bulk_update_header_records(
-        records,
+        request,
         stage,
         event_datetime,
         policy_id,
@@ -725,7 +787,7 @@ def bulk_update_records(
         request_end_date=request_end_date,
     )
     bulk_add_tracker_detail(
-        records, stage, no_stages, event_datetime, message, policy_id, policy_name
+        request, stage, no_stages, event_datetime, message, policy_id, policy_name
     )
 
 
@@ -753,7 +815,6 @@ def get_terminal_request(request: dict) -> dict:
 
         correlation_id: str = terminal_request["extnds"]
         logger.debug("Request extends correlation id %s", correlation_id)
-
         # Get data from DynamoDB table.
         response: dict = REQUEST_TRACKER_TABLE.get_item(
             Key={
@@ -762,7 +823,6 @@ def get_terminal_request(request: dict) -> dict:
             }
         )
         logger.debug("Response:\n%s", response)
-
         if "Item" in response:
             terminal_request = response["Item"]
             logger.info(
@@ -771,13 +831,57 @@ def get_terminal_request(request: dict) -> dict:
         else:
             message: str = f"Correlation id {correlation_id} not found when getting terminal request"
             raise RuntimeError(message)
-
     return terminal_request
+
+
+def dispatching_records(records: dict, action: str = "createDLCPolicy"):
+    """
+    Function to split the grouped requests further based on Configurable value MAX_DISPATCH_COUNT
+    This is added to leverage the use of MAP State in the state machine
+
+    :param records: the grouped DLC request
+    :returns: list of grouped requests.
+    """
+    records_dict = records.copy()
+    records_list = []
+    record_len = len(records["site_switch_crl_id"])
+    offset = MAX_DISPATCH_COUNT
+    record_cnt = int(record_len / MAX_DISPATCH_COUNT)
+    f_offset = 0
+    extra_data_cnt = record_len % MAX_DISPATCH_COUNT
+    record_cnt = record_cnt if record_cnt > 1 else 1
+    min_dispatch_count = int(MAX_DISPATCH_COUNT / 2)
+    if extra_data_cnt <= min_dispatch_count:
+        f_offset = MAX_DISPATCH_COUNT + extra_data_cnt
+    if min_dispatch_count < extra_data_cnt and record_cnt >= 1:
+        record_cnt += 1
+    for i in range(record_cnt):
+        if i == record_cnt - 1 and f_offset:
+            offset = f_offset
+        records_dict["site_switch_crl_id"] = records["site_switch_crl_id"][
+            i * MAX_DISPATCH_COUNT : i * MAX_DISPATCH_COUNT + offset
+        ]
+        records_dict["site"] = records["site"][
+            i * MAX_DISPATCH_COUNT : i * MAX_DISPATCH_COUNT + offset
+        ]
+        records_dict["switch_addresses"] = records["switch_addresses"][
+            i * MAX_DISPATCH_COUNT : i * MAX_DISPATCH_COUNT + offset
+        ]
+        records_dict["correlation_id"] = records["correlation_id"][
+            i * MAX_DISPATCH_COUNT : i * MAX_DISPATCH_COUNT + offset
+        ]
+        if "crrltnId" in records_dict:
+            records_dict["crrltnId"] = records["crrltnId"][
+                i * MAX_DISPATCH_COUNT : i * MAX_DISPATCH_COUNT + offset
+            ]
+        records_list.append({"action": action, "request": records_dict.copy()})
+    return records_list
 
 
 def group_contiguous_requests(contiguous_request, current_request):
     """
-    Group the contiguous requests further into sub groups based on the terminal request start datetime which is original_start_datetime and overrdValue.
+    Group the contiguous requests further into sub groups based on the terminal
+    request start datetime which is original_start_datetime and overrdValue.
 
     :param : contiguous and the current request.
     :returns: list of grouped requests.
@@ -792,17 +896,14 @@ def group_contiguous_requests(contiguous_request, current_request):
     }
 
     request_data = {
-        "action": "createDLCPolicy",
-        "request": {
-            "group_id": current_request.get("group_id"),
-            "status": current_request.get("status"),
-            "start_datetime": current_request.get("start_datetime"),
-            "end_datetime": current_request.get("end_datetime"),
-            "site": [],
-            "switch_addresses": [],
-            "correlation_id": [],
-            "site_switch_crl_id": [],
-        },
+        "group_id": current_request.get("group_id"),
+        "status": current_request.get("status"),
+        "start_datetime": current_request.get("start_datetime"),
+        "end_datetime": current_request.get("end_datetime"),
+        "site": [],
+        "switch_addresses": [],
+        "correlation_id": [],
+        "site_switch_crl_id": [],
     }
     grouped_data = {}
 
@@ -810,6 +911,7 @@ def group_contiguous_requests(contiguous_request, current_request):
         switch_addresses = req_record.get("switch_addresses")
         existing_record = contiguous_request_dict.get(switch_addresses)
 
+        # If contiguous request exists for the request in the grouped request
         if existing_record:
             key = (
                 current_request.get("group_id"),
@@ -819,38 +921,36 @@ def group_contiguous_requests(contiguous_request, current_request):
                 existing_record.get("rqstStrtDt"),
             )
             if key not in grouped_data:
+                # key policyType is added based on the statuses of current and the contiguous request
                 if current_request["status"] == existing_record["overrdValue"]:
                     policyType = "contiguousExtension"
                 else:
                     policyType = "contiguousCreation"
 
                 grouped_data[key] = {
-                    "action": "createDLCPolicy",
-                    "request": {
-                        "policyType": policyType,
-                        "group_id": current_request.get("group_id"),
-                        "status": current_request.get("status"),
-                        "start_datetime": current_request.get("start_datetime"),
-                        "end_datetime": current_request.get("end_datetime"),
-                        "original_start_datetime": existing_record.get(
-                            "original_start_datetime"
-                        ),
-                        "rqstStrtDt": existing_record.get("rqstStrtDt"),
-                        "rqstEndDt": existing_record.get("rqstEndDt"),
-                        "site": [req_record.get("site")],
-                        "switch_addresses": [req_record.get("switch_addresses")],
-                        "correlation_id": [req_record.get("correlation_id")],
-                        "crrltnId": [existing_record.get("crrltnId")],
-                        "site_switch_crl_id": [
-                            {
-                                "site": req_record.get("site"),
-                                "correlation_id": req_record.get("correlation_id"),
-                                "switch_addresses": req_record.get("switch_addresses"),
-                                "crrltnId": existing_record.get("crrltnId"),
-                                "sub_id": req_record.get("sub_id"),
-                            }
-                        ],
-                    },
+                    "policyType": policyType,
+                    "group_id": current_request.get("group_id"),
+                    "status": current_request.get("status"),
+                    "start_datetime": current_request.get("start_datetime"),
+                    "end_datetime": current_request.get("end_datetime"),
+                    "original_start_datetime": existing_record.get(
+                        "original_start_datetime"
+                    ),
+                    "rqstStrtDt": existing_record.get("rqstStrtDt"),
+                    "rqstEndDt": existing_record.get("rqstEndDt"),
+                    "site": [req_record.get("site")],
+                    "switch_addresses": [req_record.get("switch_addresses")],
+                    "correlation_id": [req_record.get("correlation_id")],
+                    "crrltnId": [existing_record.get("crrltnId")],
+                    "site_switch_crl_id": [
+                        {
+                            "site": req_record.get("site"),
+                            "correlation_id": req_record.get("correlation_id"),
+                            "switch_addresses": req_record.get("switch_addresses"),
+                            "crrltnId": existing_record.get("crrltnId"),
+                            "sub_id": req_record.get("sub_id"),
+                        }
+                    ],
                 }
 
             else:
@@ -858,13 +958,11 @@ def group_contiguous_requests(contiguous_request, current_request):
                 correlation_id = req_record.get("correlation_id")
                 switch_addresses = req_record.get("switch_addresses")
                 crrltn_id = existing_record.get("crrltnId")
-                grouped_data[key]["request"]["site"].append(site)
-                grouped_data[key]["request"]["switch_addresses"].append(
-                    switch_addresses
-                )
-                grouped_data[key]["request"]["correlation_id"].append(correlation_id)
-                grouped_data[key]["request"]["crrltnId"].append(crrltn_id)
-                grouped_data[key]["request"]["site_switch_crl_id"].append(
+                grouped_data[key]["site"].append(site)
+                grouped_data[key]["switch_addresses"].append(switch_addresses)
+                grouped_data[key]["correlation_id"].append(correlation_id)
+                grouped_data[key]["crrltnId"].append(crrltn_id)
+                grouped_data[key]["site_switch_crl_id"].append(
                     {
                         "site": site,
                         "correlation_id": correlation_id,
@@ -873,14 +971,16 @@ def group_contiguous_requests(contiguous_request, current_request):
                         "sub_id": req_record.get("sub_id"),
                     }
                 )
+
+        # If contiguous request does not exists for the request in the grouped request
         else:
             site = req_record.get("site")
             correlation_id = req_record.get("correlation_id")
             switch_addresses = req_record.get("switch_addresses")
-            request_data["request"]["site"].append(site)
-            request_data["request"]["switch_addresses"].append(switch_addresses)
-            request_data["request"]["correlation_id"].append(correlation_id)
-            request_data["request"]["site_switch_crl_id"].append(
+            request_data["site"].append(site)
+            request_data["switch_addresses"].append(switch_addresses)
+            request_data["correlation_id"].append(correlation_id)
+            request_data["site_switch_crl_id"].append(
                 {
                     "site": site,
                     "correlation_id": correlation_id,
@@ -888,9 +988,12 @@ def group_contiguous_requests(contiguous_request, current_request):
                     "sub_id": req_record.get("sub_id"),
                 }
             )
-
-    return [request_data] if len(request_data["request"]["site"]) > 0 else [], list(
-        grouped_data.values()
+    dispatched_data = []
+    for data in grouped_data.values():
+        dispatched_data += dispatching_records(data)
+    return (
+        dispatching_records(request_data) if len(request_data["site"]) > 0 else [],
+        dispatched_data,
     )
 
 
@@ -908,11 +1011,11 @@ def is_request_pending_state_machine(correlation_id: str) -> bool:
     return header_record["currentStg"] == Stage.RECEIVED.value
 
 
-def bulk_is_request_pending_state_machine(requests):
+def bulk_is_request_pending_state_machine(request):
     """
-    Determines if the request is in a final state and or in progress state.
+    Determines if the request is in a final state and or in progress state for a group dispatch.
 
-    :param correlation_id: Correlation ID of a given DLC request.
+    :param request: group dispatch request.
     :returns: False if the request exists and is not in an in progress or final step. Otherwise, True.
     """
     site_switch_crl_id = []
@@ -920,7 +1023,7 @@ def bulk_is_request_pending_state_machine(requests):
     switch_addresses = []
     correlation_id = []
 
-    site_switch_crl_ids = get_bulk_header_record(requests)
+    site_switch_crl_ids = get_bulk_header_record(request)
 
     if site_switch_crl_ids:
         for item in site_switch_crl_ids:
@@ -928,10 +1031,10 @@ def bulk_is_request_pending_state_machine(requests):
             site.append(item["site"])
             switch_addresses.append(item["switch_addresses"])
             correlation_id.append(item["correlation_id"])
-        requests["site_switch_crl_id"] = site_switch_crl_id
-        requests["site"] = site
-        requests["switch_addresses"] = switch_addresses
-        requests["correlation_id"] = correlation_id
+        request["site_switch_crl_id"] = site_switch_crl_id
+        request["site"] = site
+        request["switch_addresses"] = switch_addresses
+        request["correlation_id"] = correlation_id
         return True
     return False
 
@@ -948,12 +1051,8 @@ def get_contiguous_request(request: dict, cancel_req=False):
     - end date of previous request = this request's start date
 
     :param request: the Load Control override request to use in order to determine contiguousness
-    :return: a tuple containing:
-    1. The request contiguous to this one;
-    2. The terminal (first or last) request in the chain.
+    :param cancel_req: to identify from where the function is called
     """
-    ddb_table: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
-
     site = request["site"]
     start_datetime: str = request["start_datetime"]
 
@@ -969,6 +1068,7 @@ def get_contiguous_request(request: dict, cancel_req=False):
     # - end date of period = this request's start date
     if "site_switch_crl_id" in request:
         item_len = len(request["site_switch_crl_id"])
+        # The maximum number of operands for the IN comparator is 100 in dynamoDB
         if item_len % 100 != 0:
             item_len += 100
         site_switch_crl_id = request["site_switch_crl_id"]
@@ -982,39 +1082,45 @@ def get_contiguous_request(request: dict, cancel_req=False):
         item_len = 100
         gsi3pk = [f"{GSI3PK_PREFIX}{site}#{switch_addresses}"]
 
-    gsi3sk: str = f"{GSI3SK_PREFIX}{start_datetime}"  # Should be in ISO format.
+    # Should be in ISO format.
+    gsi3sk: str = f"{GSI3SK_PREFIX}{start_datetime}"
 
     stages: list = [
         Stage.POLICY_CREATED.value,
         Stage.POLICY_EXTENDED.value,
         Stage.POLICY_DEPLOYED.value,
         Stage.DLC_OVERRIDE_STARTED.value,
-        Stage.EXTENDED_BY.value,  # needed for recognising contiguous requests to a request we are cancelling
+        Stage.EXTENDED_BY.value,
+        # needed for recognising contiguous requests to a request we are
+        # cancelling
     ]
-    for i in gsi3pk:
+
+    # dynamoDb query cannot be used here since it requires KeyConditionExpression
+    # dynamoDb scan will be used instead
+    for i in range(int(item_len / 100)):
         while True:
             if last_evaluated_key:
                 # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
                 # which was supplied as part of the previous page's results -
                 # specify as ExclusiveStartKey.
-                response: dict = ddb_table.query(
+                response: dict = REQUEST_TRACKER_TABLE.scan(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    KeyConditionExpression=Key("GSI3PK").eq(i)
-                    & Key("GSI3SK").eq(gsi3sk),  # GSI3SK holds the request end date.
-                    FilterExpression=Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
+                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
+                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
+                    & Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                     ExclusiveStartKey=last_evaluated_key,
                 )
             else:
                 # This only runs the first time - provide no ExclusiveStartKey
                 # initially.
-                response: dict = ddb_table.query(
+                response: dict = REQUEST_TRACKER_TABLE.scan(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    KeyConditionExpression=Key("GSI3PK").eq(i)
-                    & Key("GSI3SK").eq(gsi3sk),  # GSI3SK holds the request end date.
-                    FilterExpression=Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
+                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
+                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
+                    & Attr("svcName").gte(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                 )
 
@@ -1032,10 +1138,16 @@ def get_contiguous_request(request: dict, cancel_req=False):
             else:
                 break
 
+    # If no contiguous requests found from Db
     if not items:
         logger.info("No contiguous requests found")
         resp = {"request": request, "action": "createDLCPolicy"}
+        if "site_switch_crl_id" in request:
+            resp = dispatching_records(request)
+            return resp
         return None if cancel_req else [resp]
+
+    # If the current request is not a part of group dispatch
     if "site_switch_crl_id" not in request:
         contiguous_request = items[0]
         contiguous_request.update(
@@ -1048,13 +1160,18 @@ def get_contiguous_request(request: dict, cancel_req=False):
                 "site": request.get("site", None),
             }
         )
+        # Key policyType is set after checking the statuses of both current and contiguous request
         if contiguous_request["status"] == contiguous_request["overrdValue"]:
             contiguous_request["policyType"] = "contiguousExtension"
         elif contiguous_request["status"] != contiguous_request["overrdValue"]:
             contiguous_request["policyType"] = "contiguousCreation"
+
+        # action "createDLCPolicy" is added along with request
         resp = {"request": contiguous_request, "action": "createDLCPolicy"}
         return resp if cancel_req else [resp]
 
+    # Requests which are a part of grouped dispatch and if contiguous requests are present for any of the request in the grouped request,
+    # they are further grouped based on the extension and creation cases
     request, contiguous_requests = group_contiguous_requests(items, request)
     request = contiguous_requests + request
     logger.info("Sub grouped request : %s", request)
