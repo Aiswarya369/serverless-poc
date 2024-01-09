@@ -209,12 +209,12 @@ def do_batch_get(batch_keys):
     tries = 0
     max_tries = 5
     sleep_time = 1  # Start with 1 second of sleep, then exponentially increase.
-    retrieved = {key: [] for key in batch_keys}
+    retrieved = []
     while tries < max_tries:
         response = DYNAMODB_CLIENT.batch_get_item(RequestItems=batch_keys)
         # Collect any retrieved items and retry unprocessed keys.
         for key in response.get("Responses", []):
-            retrieved[key] += response["Responses"][key]
+            retrieved += response["Responses"][key]
         unprocessed = response["UnprocessedKeys"]
         if len(unprocessed) > 0:
             batch_keys = unprocessed
@@ -263,34 +263,12 @@ def get_bulk_header_record(request):
     keys = []
     for i in range(data_len):
         keys.append({"PK": {"S": pk[i]}, "SK": {"S": sk[i]}})
-        if i % 100 == 0 or i == data_len:
+        if i % 5 == 0 or i == data_len:
             batchKeys = {REQUEST_TRACKER_TABLE_NAME: {"Keys": keys}}
             response = do_batch_get(batchKeys)
             keys = []
-        # last_evaluated_key = False
-        # while True:
-        #     if last_evaluated_key:
-        #         # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
-        #         # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
-        #         response: dict = REQUEST_TRACKER_TABLE.scan(
-        #             FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-        #             & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
-        #             ExclusiveStartKey=last_evaluated_key,
-        #         )
-        #     else:
-        #         # This only runs the first time - provide no ExclusiveStartKey initially.
-        #         response: dict = REQUEST_TRACKER_TABLE.scan(
-        #             FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-        #             & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
-        #         )
-        #     # Append retrieved records to our result set.
-        #     items.extend(response["Items"])
-        #     if "LastEvaluatedKey" in response:
-        #         last_evaluated_key = response["LastEvaluatedKey"]
-        #         # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
-        #     else:
-        #         break
-    logger.info("Response:\n%s", response)
+
+    logger.info("Response Bulk get header:\n%s", response)
 
     for item in items:
         if (
@@ -670,34 +648,20 @@ def bulk_update_header_records(
         pk.append(f"{PK_PREFIX}{correlation_id}")
         sk.append(f"{SK_REQUEST_PREFIX}{correlation_id}")
     table: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
+    
     items = []
-    data_len = len(data["site_switch_crl_id"])
-    if data_len % 100 != 0:
-        data_len += 100
-    for i in range(int(data_len / 100)):
-        last_evaluated_key = False
-        while True:
-            if last_evaluated_key:
-                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
-                # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
-                response: dict = table.scan(
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
-                    ExclusiveStartKey=last_evaluated_key,
-                )
-            else:
-                # This only runs the first time - provide no ExclusiveStartKey initially.
-                response: dict = table.scan(
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
-                )
-            # Append retrieved records to our result set.
-            items.extend(response["Items"])
-            if "LastEvaluatedKey" in response:
-                last_evaluated_key = response["LastEvaluatedKey"]
-                # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
-            else:
-                break
+    data_len = len(site_switch_crl_ids)
+
+    keys = []
+    for i in range(data_len):
+        keys.append({"PK": {"S": pk[i]}, "SK": {"S": sk[i]}})
+        if i % 5 == 0 or i == data_len:
+            batchKeys = {REQUEST_TRACKER_TABLE_NAME: {"Keys": keys}}
+            response = do_batch_get(batchKeys)
+            keys = [] 
+            
+    logger.info("Response Bulk Update Header:\n%s", response)   
+         
     with table.batch_writer() as batch:
         for item in items:
             no_stages[item["PK"]] = int(item["noStages"] + 1)
@@ -1027,28 +991,30 @@ def get_contiguous_request(request: dict, cancel_req=False):
         Stage.DLC_OVERRIDE_STARTED.value,
         Stage.EXTENDED_BY.value,  # needed for recognising contiguous requests to a request we are cancelling
     ]
-    for i in range(int(item_len / 100)):
+    for i in gsi3pk:
         while True:
             if last_evaluated_key:
                 # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
-                # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
-                response: dict = ddb_table.scan(
+                # which was supplied as part of the previous page's results -
+                # specify as ExclusiveStartKey.
+                response: dict = ddb_table.query(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
-                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
-                    & Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
+                    KeyConditionExpression=Key("GSI3PK").eq(i)
+                    & Key("GSI3SK").eq(gsi3sk),  # GSI3SK holds the request end date.
+                    FilterExpression=Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                     ExclusiveStartKey=last_evaluated_key,
                 )
             else:
-                # This only runs the first time - provide no ExclusiveStartKey initially.
-                response: dict = ddb_table.scan(
+                # This only runs the first time - provide no ExclusiveStartKey
+                # initially.
+                response: dict = ddb_table.query(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
-                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
-                    & Attr("svcName").gte(LOAD_CONTROL_SERVICE_NAME)
+                    KeyConditionExpression=Key("GSI3PK").eq(i)
+                    & Key("GSI3SK").eq(gsi3sk),  # GSI3SK holds the request end date.
+                    FilterExpression=Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                 )
 

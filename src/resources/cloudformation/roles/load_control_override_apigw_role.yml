@@ -40,6 +40,7 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:Scan
                   - dynamodb:BatchWriteItem
+                  - dynamodb:BatchGetItem
                 Resource: arn:aws:dynamodb:ap-south-1:752671163579:table/${self:custom.REQUEST_TRACKER_TABLE_NAME}
               - Sid: "OverrideThrottleQueueAccess"
                 Effect: Allow
