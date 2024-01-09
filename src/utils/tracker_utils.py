@@ -2,7 +2,7 @@ import datetime
 import logging
 import os
 import boto3
-
+import time
 from datetime import datetime, timezone
 from logging import Logger
 from typing import Tuple, Optional
@@ -32,6 +32,8 @@ REQUEST_TRACKER_TABLE_NAME: str = os.environ.get("REQUEST_TRACKER_TABLE_NAME", "
 # Boto3 resources.
 DYNAMODB_RESOURCE: BaseClient = boto3.resource("dynamodb", region_name=REGION)
 REQUEST_TRACKER_TABLE: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
+
+DYNAMODB_CLIENT = boto3.client("dynamodb", region_name=REGION)
 
 # Constants.
 LOAD_CONTROL_SERVICE_NAME: str = "load_control"
@@ -203,6 +205,36 @@ def get_header_record(correlation_id: str) -> Optional[dict]:
     return response.get("Item")
 
 
+def do_batch_get(batch_keys):
+    tries = 0
+    max_tries = 5
+    sleep_time = 1  # Start with 1 second of sleep, then exponentially increase.
+    retrieved = {key: [] for key in batch_keys}
+    while tries < max_tries:
+        response = DYNAMODB_CLIENT.batch_get_item(RequestItems=batch_keys)
+        # Collect any retrieved items and retry unprocessed keys.
+        for key in response.get("Responses", []):
+            retrieved[key] += response["Responses"][key]
+        unprocessed = response["UnprocessedKeys"]
+        if len(unprocessed) > 0:
+            batch_keys = unprocessed
+            unprocessed_count = sum(
+                [len(batch_key["Keys"]) for batch_key in batch_keys.values()]
+            )
+            logger.info(
+                "%s unprocessed keys returned. Sleep, then retry.", unprocessed_count
+            )
+            tries += 1
+            if tries < max_tries:
+                logger.info("Sleeping for %s seconds.", sleep_time)
+                time.sleep(sleep_time)
+                sleep_time = min(sleep_time * 2, 32)
+        else:
+            break
+
+    return retrieved
+
+
 def get_bulk_header_record(request):
     """
     Get request tracker header record for the supplied correlation_id.
@@ -225,33 +257,40 @@ def get_bulk_header_record(request):
 
     items = []
     data_len = len(site_switch_crl_ids)
-    if data_len % 100 != 0:
-        data_len += 100
-    for i in range(int(data_len / 100)):
-        last_evaluated_key = False
-        while True:
-            if last_evaluated_key:
-                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
-                # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
-                    ExclusiveStartKey=last_evaluated_key,
-                )
-            else:
-                # This only runs the first time - provide no ExclusiveStartKey initially.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
-                )
-            # Append retrieved records to our result set.
-            items.extend(response["Items"])
-            if "LastEvaluatedKey" in response:
-                last_evaluated_key = response["LastEvaluatedKey"]
-                # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
-            else:
-                break
-    # logger.debug("Response:\n%s", response)
+    # if data_len % 100 != 0:
+    #     data_len += 100
+
+    keys = []
+    for i in range(data_len):
+        keys.append({"PK": {"S": pk[i]}, "SK": {"S": sk[i]}})
+        if i % 100 == 0 or i == data_len:
+            batchKeys = {REQUEST_TRACKER_TABLE_NAME: {"Keys": keys}}
+            response = do_batch_get(batchKeys)
+            keys = []
+        # last_evaluated_key = False
+        # while True:
+        #     if last_evaluated_key:
+        #         # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
+        #         # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
+        #         response: dict = REQUEST_TRACKER_TABLE.scan(
+        #             FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+        #             & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+        #             ExclusiveStartKey=last_evaluated_key,
+        #         )
+        #     else:
+        #         # This only runs the first time - provide no ExclusiveStartKey initially.
+        #         response: dict = REQUEST_TRACKER_TABLE.scan(
+        #             FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
+        #             & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
+        #         )
+        #     # Append retrieved records to our result set.
+        #     items.extend(response["Items"])
+        #     if "LastEvaluatedKey" in response:
+        #         last_evaluated_key = response["LastEvaluatedKey"]
+        #         # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
+        #     else:
+        #         break
+    logger.info("Response:\n%s", response)
 
     for item in items:
         if (
