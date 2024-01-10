@@ -150,14 +150,16 @@ def create_tracker(
     }
 
     if serial_no:
-        header_item["GSI3PK"] = f"{GSI3PK_PREFIX}{request_site}#{serial_no}"
+        header_item["GSI3SK"] = f"{GSI3PK_PREFIX}{request_site}#{serial_no}"
         header_item["mtrSrlNo"] = serial_no
 
     if request_start_date:
         start: str = request_start_date.isoformat(timespec="seconds")
         header_item["rqstStrtDt"] = start
     if request_end_date:
-        header_item["rqstEndDt"] = request_end_date.isoformat(timespec="seconds")
+        end_date = request_end_date.isoformat(timespec="seconds")
+        header_item["rqstEndDt"] = end_date
+        header_item["GSI3PK"] = f"{GSI3SK_PREFIX}{end_date}"
 
     if override:
         header_item["overrdValue"] = override
@@ -225,6 +227,10 @@ def get_bulk_header_record(request):
     items = []
     data_len = len(site_switch_crl_ids)
 
+    # Should be in ISO format.
+    end_datetime = request["end_datetime"]
+    gsi3pk: str = f"{GSI3SK_PREFIX}{end_datetime}"
+
     # The maximum number of operands for the IN comparator is 100 in dynamoDB
     # dynamoDb query cannot be used here since it requires KeyConditionExpression
     # dynamoDb scan will be used instead
@@ -238,7 +244,9 @@ def get_bulk_header_record(request):
                 # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
                 # which was supplied as part of the previous page's results -
                 # specify as ExclusiveStartKey.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
+                response: dict = REQUEST_TRACKER_TABLE.query(
+                    IndexName="GSI3",
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
                     FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
                     & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
                     ExclusiveStartKey=last_evaluated_key,
@@ -246,9 +254,11 @@ def get_bulk_header_record(request):
             else:
                 # This only runs the first time - provide no ExclusiveStartKey
                 # initially.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
+                response: dict = REQUEST_TRACKER_TABLE.query(
+                    IndexName="GSI3",
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
                     FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
                 )
             # Append retrieved records to our result set.
             items.extend(response["Items"])
@@ -360,8 +370,8 @@ def update_header_record(
         )
         # Request end date is also used as the sort key of the Global Secondary
         # Index.
-        update_expression += ", #GSI3SK = :val10"
-        expression_attribute_names["#GSI3SK"] = "GSI3SK"
+        update_expression += ", #GSI3PK = :val10"
+        expression_attribute_names["#GSI3PK"] = "GSI3PK"
         expression_attribute_values[
             ":val10"
         ] = f"{GSI3SK_PREFIX}{request_end_date.isoformat()}"
@@ -680,6 +690,10 @@ def bulk_update_header_records(
     items = []
     data_len = len(data["site_switch_crl_id"])
 
+    # Should be in ISO format.
+    end_datetime = data["end_datetime"]
+    gsi3pk: str = f"{GSI3SK_PREFIX}{end_datetime}"
+
     # The maximum number of operands for the IN comparator is 100 in dynamoDB
     # dynamoDb query cannot be used here since it requires KeyConditionExpression
     # dynamoDb scan will be used instead
@@ -692,7 +706,9 @@ def bulk_update_header_records(
                 # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
                 # which was supplied as part of the previous page's results -
                 # specify as ExclusiveStartKey.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
+                response: dict = REQUEST_TRACKER_TABLE.query(
+                    IndexName="GSI3",
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
                     FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
                     & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
                     ExclusiveStartKey=last_evaluated_key,
@@ -700,9 +716,11 @@ def bulk_update_header_records(
             else:
                 # This only runs the first time - provide no ExclusiveStartKey
                 # initially.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
+                response: dict = REQUEST_TRACKER_TABLE.query(
+                    IndexName="GSI3",
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
                     FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100])
+                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
                 )
             # Append retrieved records to our result set.
             items.extend(response["Items"])
@@ -746,7 +764,7 @@ def bulk_update_header_records(
             if request_end_date:
                 end_date = datetime.isoformat(request_end_date)
                 item["rqstEndDt"] = end_date
-                item["GSI3SK"] = f"{GSI3SK_PREFIX}{end_date}"
+                item["GSI3PK"] = f"{GSI3SK_PREFIX}{end_date}"
 
             batch.put_item(Item=item)
     return no_stages
@@ -1103,11 +1121,13 @@ def get_contiguous_request(request: dict, cancel_req=False):
                 # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
                 # which was supplied as part of the previous page's results -
                 # specify as ExclusiveStartKey.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
+                response: dict = REQUEST_TRACKER_TABLE.query(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
-                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3sk),
+                    FilterExpression=Attr("GSI3SK").is_in(
+                        gsi3pk[i * 100 : i * 100 + 100]
+                    )
                     & Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                     ExclusiveStartKey=last_evaluated_key,
@@ -1115,11 +1135,13 @@ def get_contiguous_request(request: dict, cancel_req=False):
             else:
                 # This only runs the first time - provide no ExclusiveStartKey
                 # initially.
-                response: dict = REQUEST_TRACKER_TABLE.scan(
+                response: dict = REQUEST_TRACKER_TABLE.query(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    FilterExpression=Key("GSI3SK").eq(gsi3sk)
-                    & Attr("GSI3PK").is_in(gsi3pk[i * 100 : i * 100 + 100])
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3sk),
+                    FilterExpression=Attr("GSI3SK").is_in(
+                        gsi3pk[i * 100 : i * 100 + 100]
+                    )
                     & Attr("svcName").gte(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                 )
