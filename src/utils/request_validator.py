@@ -40,8 +40,8 @@ MSG_OVERLAP: str = (
     "please cancel the existing request(s)"
 )
 
-GSI3PK_PREFIX: str = "SITE#MTR#"
-GSI3SK_PREFIX: str = "REQUESTENDDATE#"
+GSI3SK_PREFIX: str = "SITE#MTR#"
+GSI3PK_PREFIX: str = "REQUESTENDDATE#"
 
 
 @dataclass
@@ -273,8 +273,8 @@ class RequestValidator:
         items: list = []
         last_evaluated_key: Optional[dict] = None
 
-        gsi3pk: str = f"{GSI3PK_PREFIX}{site}#{meter_serial_number}"
-        gsi3sk: str = f"{GSI3SK_PREFIX}{start}"
+        gsi3pk: str = f"{GSI3PK_PREFIX}{start}"
+        gsi3sk: str = f"{GSI3SK_PREFIX}{site}#{meter_serial_number}"
         stages: list = [
             Stage.CANCELLED.value,
             Stage.DECLINED.value,
@@ -287,8 +287,8 @@ class RequestValidator:
                 # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
                 response: dict = ddb_table.query(
                     IndexName="GSI3",
-                    KeyConditionExpression=Key("GSI3PK").eq(gsi3sk)
-                    & Key("GSI3SK").gte(gsi3pk),  # GSI3SK holds the request end date.
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk)
+                    & Key("GSI3SK").gte(gsi3sk),  # GSI3SK holds the request end date.
                     FilterExpression=Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("rqstStrtDt").lte(end)
                     & Not(Attr("currentStg").is_in(stages)),
@@ -298,8 +298,8 @@ class RequestValidator:
                 # This only runs the first time - provide no ExclusiveStartKey initially.
                 response: dict = ddb_table.query(
                     IndexName="GSI3",
-                    KeyConditionExpression=Key("GSI3PK").eq(gsi3sk)
-                    & Key("GSI3SK").gte(gsi3pk),   # GSI3SK holds the request end date.
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk)
+                    & Key("GSI3SK").gte(gsi3sk),  # GSI3SK holds the request end date.
                     FilterExpression=Attr("svcName").gte(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("rqstStrtDt").lte(end)
                     & Not(Attr("currentStg").is_in(stages)),

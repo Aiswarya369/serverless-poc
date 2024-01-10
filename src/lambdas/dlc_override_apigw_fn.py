@@ -207,9 +207,6 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
     correlation_id = create_correlation_id(site, now)
     request["correlation_id"] = correlation_id
 
-    # subscription_id from the pathparameter is added to the request
-    request["sub_id"]: str = subscription_id
-
     # Get additional details from the request now that it has passed
     # validation.
     override_status: str = request["status"]
@@ -221,6 +218,7 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         switch_addresses[0] if isinstance(switch_addresses, list) else switch_addresses
     )
 
+    request_end_date = request.get("end_datetime", None)
     # Create initial request tracker records.
     # We can't add the request start and end dates to the tracker header record here because we need to validate
     # them first prior to parsing to datetime objects, which we do below.
@@ -235,6 +233,9 @@ def job_entry(event: Dict[str, Any]) -> Dict[str, Any]:
         serial_no=request["switch_addresses"],
         override=override_status,
         group_id=request.get("group_id", None),
+        request_end_date=datetime.fromisoformat(request_end_date)
+        if request_end_date
+        else None,
     )
     # Validate the subscription.
     _, subscription_errors = RequestValidator.validate_subscription(

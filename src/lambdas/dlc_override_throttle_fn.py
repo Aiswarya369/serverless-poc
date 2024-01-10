@@ -34,6 +34,7 @@ from src.utils.tracker_utils import (
     is_request_pending_state_machine,
     bulk_is_request_pending_state_machine,
     bulk_update_tracker,
+    update_header_end_date,
 )
 
 # Environmental variables
@@ -82,31 +83,29 @@ def get_step_function_client() -> BaseClient:
     return boto3.client("stepfunctions", region_name=REGION)
 
 
-def report_error_to_client(records, message):
+def report_error_to_client(record, message):
     """
     Updated the request tracker with a failure status and reports the failure to the client via the Kinesis stream.
 
-    :param correlation_id: The request correlation_id.
+    :param record: The DLC request.
     :param message: The error message for the failure.
-    :param request_start_date: An optional start date for the request.
-    :param request_end_date: An optional end date for the request.
     """
     error_datetime = datetime.now(timezone.utc)
     request_start_date = (
-        datetime.fromisoformat(records["start_datetime"])
-        if records["start_datetime"]
+        datetime.fromisoformat(record["start_datetime"])
+        if record["start_datetime"]
         else None
     )
     request_end_date = (
-        datetime.fromisoformat(records["end_datetime"])
-        if records["end_datetime"]
+        datetime.fromisoformat(record["end_datetime"])
+        if record["end_datetime"]
         else None
     )
-    if "site_switch_crl_id" in records:
-        bulk_update_tracker(records, Stage.DECLINED, error_datetime, message=message)
+    if "site_switch_crl_id" in record:
+        bulk_update_tracker(record, Stage.DECLINED, error_datetime, message=message)
         return
     update_tracker(
-        correlation_id=records["correlation_id"],
+        correlation_id=record["correlation_id"],
         stage=Stage.DECLINED,
         event_datetime=error_datetime,
         message=message,
@@ -114,7 +113,7 @@ def report_error_to_client(records, message):
         request_end_date=request_end_date,
     )
     payload = assemble_event_payload(
-        records["correlation_id"], Stage.DECLINED, error_datetime, message
+        record["correlation_id"], Stage.DECLINED, error_datetime, message
     )
     deliver_to_kinesis(payload, KINESIS_DATA_STREAM_NAME)
 
@@ -145,13 +144,13 @@ def update_start_end_times_on_request(
     :returns: (start datetime, end datetime) of the request in UTC.
     """
     start = datetime.now(tz=timezone.utc)
-    if "start_datetime" in request:
+    if ("start_datetime" in request) and request["start_datetime"]:
         start = datetime.fromisoformat(request["start_datetime"])
         start = start.astimezone(tz=timezone.utc)
     request["start_datetime"] = start.isoformat(timespec="seconds")
 
     end = start + timedelta(minutes=DEFAULT_OVERRIDE_DURATION_MINUTES)
-    if "end_datetime" in request:
+    if ("end_datetime" in request) and request["end_datetime"]:
         end = datetime.fromisoformat(request["end_datetime"])
         end = end.astimezone(tz=timezone.utc)
     request["end_datetime"] = end.isoformat(timespec="seconds")
@@ -159,6 +158,13 @@ def update_start_end_times_on_request(
 
 
 def report_error(correlation_id, reason, subject_hint=None):
+    """
+    Function to call report error to support in case of group and individual dispatch.
+
+    :param correlation_id: The correlation ID for the request that failed.
+    :param reason: The reason why it failed.
+    :param subject_hint: The subject hint that will appear in OpsGenie.
+    """
     if not isinstance(correlation_id, str):
         partial_report_error_to_support = partial(
             report_error_to_support, reason=reason, subject_hint=subject_hint
@@ -303,6 +309,8 @@ def record_handler(record):
 
     _, request_end = update_start_end_times_on_request(record)
 
+    update_header_end_date(record)
+
     if request_end <= datetime.now(tz=timezone.utc):
         logger.error(
             "Request with correlation_id '%s', has been throttled for too long",
@@ -336,9 +344,9 @@ def group_records(event):
     grouped_records = {}
 
     for record in data:
-        group_id = record.get("group_id")
+        group_id = record.get("group_id", None)
 
-        if group_id is None:  # Requests with no group_id
+        if not group_id:  # Requests with no group_id
             nan_records.append(record)
         else:  # Requests with group_id
             key = (
@@ -352,8 +360,8 @@ def group_records(event):
                 grouped_records[key] = {
                     "group_id": group_id,
                     "status": record.get("status"),
-                    "start_datetime": record.get("start_datetime"),
-                    "end_datetime": record.get("end_datetime"),
+                    "start_datetime": record.get("start_datetime", None),
+                    "end_datetime": record.get("end_datetime", None),
                     "switch_addresses": [],
                     "site": [],
                     "correlation_id": [],
@@ -373,7 +381,6 @@ def group_records(event):
                     "site": site,
                     "switch_addresses": switch_addresses,
                     "correlation_id": correlation_id,
-                    "sub_id": record.get("sub_id"),
                 }
             )
 

@@ -44,8 +44,8 @@ GSI1PK_PREFIX: str = "SITE#"
 GSI1SK_PREFIX: str = "REQ#"
 GSI2PK_PREFIX: str = "SUBSCRIPTIONID#"
 GSI2SK_PREFIX: str = "REQ#"
-GSI3PK_PREFIX: str = "SITE#MTR#"
-GSI3SK_PREFIX: str = "REQUESTENDDATE#"
+GSI3SK_PREFIX: str = "SITE#MTR#"
+GSI3PK_PREFIX: str = "REQUESTENDDATE#"
 GSI4PK_PREFIX: str = "HEADEND#"
 GSI4SK_PREFIX: str = "HEADEND_ID#"
 
@@ -100,6 +100,53 @@ def assemble_event_payload(
     return payload.as_camelcase_dict()
 
 
+def update_header_end_date(data):
+    pk = []
+
+    if "site_switch_crl_id" in data:
+        for site_switch_crl_id in data["site_switch_crl_id"]:
+            pk.append(f"{PK_PREFIX}{site_switch_crl_id['correlation_id']}")
+            # sk.append(f"{SK_REQUEST_PREFIX}{correlation_id}")
+    else:
+        pk.append(f"{PK_PREFIX}{data['correlation_id']}")
+    table: BaseClient = DYNAMODB_RESOURCE.Table(REQUEST_TRACKER_TABLE_NAME)
+    items = []
+    data_len = len(pk)
+    if data_len % 100 != 0:
+        data_len += 100
+    for i in range(int(data_len / 100)):
+        last_evaluated_key = False
+        while True:
+            if last_evaluated_key:
+                # In calls after the first (the second page of result data onwards), provide the LastEvaluatedKey
+                # which was supplied as part of the previous page's results - specify as ExclusiveStartKey.
+                response: dict = table.query(
+                    IndexName="GSI3",
+                    KeyConditionExpression=Key("GSI3PK").eq("NO_DATE"),
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100]),
+                    ExclusiveStartKey=last_evaluated_key,
+                )
+            else:
+                # This only runs the first time - provide no ExclusiveStartKey initially.
+                response: dict = table.query(
+                    IndexName="GSI3",
+                    KeyConditionExpression=Key("GSI3PK").eq("NO_DATE"),
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100]),
+                )
+            # Append retrieved records to our result set.
+            items.extend(response["Items"])
+            if "LastEvaluatedKey" in response:
+                last_evaluated_key = response["LastEvaluatedKey"]
+                # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
+            else:
+                break
+    with table.batch_writer() as batch:
+        for item in items:
+            end_date = data["end_datetime"]
+            item["GSI3PK"] = f"{GSI3PK_PREFIX}{end_date}"
+            batch.put_item(Item=item)
+
+
 def create_tracker(
     correlation_id: str,
     sub_id: str,
@@ -150,7 +197,7 @@ def create_tracker(
     }
 
     if serial_no:
-        header_item["GSI3SK"] = f"{GSI3PK_PREFIX}{request_site}#{serial_no}"
+        header_item["GSI3SK"] = f"{GSI3SK_PREFIX}{request_site}#{serial_no}"
         header_item["mtrSrlNo"] = serial_no
 
     if request_start_date:
@@ -159,7 +206,9 @@ def create_tracker(
     if request_end_date:
         end_date = request_end_date.isoformat(timespec="seconds")
         header_item["rqstEndDt"] = end_date
-        header_item["GSI3PK"] = f"{GSI3SK_PREFIX}{end_date}"
+        header_item["GSI3PK"] = f"{GSI3PK_PREFIX}{end_date}"
+    else:
+        header_item["GSI3PK"] = "NO_DATE"
 
     if override:
         header_item["overrdValue"] = override
@@ -216,20 +265,19 @@ def get_bulk_header_record(request):
         "Getting header record for correlation id %s", request["correlation_id"]
     )
     pk = []
-    sk = []
+
     site_switch_crl_map = {}
     site_switch_crl_ids = request["site_switch_crl_id"]
     for site_switch_crl_id in site_switch_crl_ids:
         site_switch_crl_map[site_switch_crl_id["switch_addresses"]] = site_switch_crl_id
         pk.append(f"{PK_PREFIX}{site_switch_crl_id['correlation_id']}")
-        sk.append(f"{SK_REQUEST_PREFIX}{site_switch_crl_id['correlation_id']}")
 
     items = []
     data_len = len(site_switch_crl_ids)
 
     # Should be in ISO format.
     end_datetime = request["end_datetime"]
-    gsi3pk: str = f"{GSI3SK_PREFIX}{end_datetime}"
+    gsi3pk: str = f"{GSI3PK_PREFIX}{end_datetime}"
 
     # The maximum number of operands for the IN comparator is 100 in dynamoDB
     # dynamoDb query cannot be used here since it requires KeyConditionExpression
@@ -247,8 +295,7 @@ def get_bulk_header_record(request):
                 response: dict = REQUEST_TRACKER_TABLE.query(
                     IndexName="GSI3",
                     KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100]),
                     ExclusiveStartKey=last_evaluated_key,
                 )
             else:
@@ -257,8 +304,7 @@ def get_bulk_header_record(request):
                 response: dict = REQUEST_TRACKER_TABLE.query(
                     IndexName="GSI3",
                     KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100]),
                 )
             # Append retrieved records to our result set.
             items.extend(response["Items"])
@@ -612,18 +658,20 @@ def bulk_add_tracker_detail(
                 ]: str = f"Request {item['crrltnId']} has been extended by request {item['correlation_id']}"
                 detail_item["extnddBy"] = item["correlation_id"]
             pk = f"{PK_PREFIX}{correlation_id}"
+            sub_id = no_stages[pk]["sub_id"]
+            stg = no_stages[pk]["stage"]
             detail_item.update(
                 {
-                    "SK": f"{SK_STAGE_PREFIX}{no_stages[pk]}",
-                    "stg": no_stages[pk],
+                    "SK": f"{SK_STAGE_PREFIX}{stg}",
+                    "stg": stg,
                     "PK": pk,
                     "GSI1PK": f"{GSI1PK_PREFIX}{item['site']}",
                     "GSI1SK": f"{GSI1SK_PREFIX}{correlation_id}",
-                    "GSI2PK": f"{GSI2PK_PREFIX}{item['sub_id']}",
+                    "GSI2PK": f"{GSI2PK_PREFIX}{sub_id}",
                     "GSI2SK": f"{GSI2SK_PREFIX}{correlation_id}",
                     "crrltnId": correlation_id,
                     "mtrSrlNo": item["switch_addresses"],
-                    "subId": item["sub_id"],
+                    "subId": sub_id,
                 }
             )
             if message:
@@ -675,7 +723,7 @@ def bulk_update_header_records(
     :param request_end_date: The request end datetime
     """
     pk = []
-    sk = []
+
     no_stages = {}
     site_switch_crl_ids = {}
     for site_switch_crl_id in data["site_switch_crl_id"]:
@@ -685,14 +733,16 @@ def bulk_update_header_records(
             correlation_id = site_switch_crl_id["correlation_id"]
         site_switch_crl_ids[site_switch_crl_id["switch_addresses"]] = site_switch_crl_id
         pk.append(f"{PK_PREFIX}{correlation_id}")
-        sk.append(f"{SK_REQUEST_PREFIX}{correlation_id}")
 
     items = []
     data_len = len(data["site_switch_crl_id"])
 
     # Should be in ISO format.
     end_datetime = data["end_datetime"]
-    gsi3pk: str = f"{GSI3SK_PREFIX}{end_datetime}"
+    start_datetime = data["start_datetime"]
+    gsi3pk: str = f"{GSI3PK_PREFIX}{end_datetime}"
+    if stage.value == Stage.EXTENDED_BY.value:
+        gsi3pk: str = f"{GSI3PK_PREFIX}{start_datetime}"
 
     # The maximum number of operands for the IN comparator is 100 in dynamoDB
     # dynamoDb query cannot be used here since it requires KeyConditionExpression
@@ -709,8 +759,7 @@ def bulk_update_header_records(
                 response: dict = REQUEST_TRACKER_TABLE.query(
                     IndexName="GSI3",
                     KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100]),
                     ExclusiveStartKey=last_evaluated_key,
                 )
             else:
@@ -719,8 +768,7 @@ def bulk_update_header_records(
                 response: dict = REQUEST_TRACKER_TABLE.query(
                     IndexName="GSI3",
                     KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
-                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100])
-                    & Attr("SK").is_in(sk[i * 100 : i * 100 + 100]),
+                    FilterExpression=Attr("PK").is_in(pk[i * 100 : i * 100 + 100]),
                 )
             # Append retrieved records to our result set.
             items.extend(response["Items"])
@@ -729,9 +777,14 @@ def bulk_update_header_records(
                 # logger.debug("Last evaluated key: %s - retrieving more records", last_evaluated_key)
             else:
                 break
+
+    logger.info("DB Result in bulk update : %s", items)
     with REQUEST_TRACKER_TABLE.batch_writer() as batch:
         for item in items:
-            no_stages[item["PK"]] = int(item["noStages"] + 1)
+            no_stages[item["PK"]] = {
+                "stage": int(item["noStages"] + 1),
+                "sub_id": item["subId"],
+            }
             item.update(
                 {
                     "currentStg": stage.value,
@@ -764,7 +817,7 @@ def bulk_update_header_records(
             if request_end_date:
                 end_date = datetime.isoformat(request_end_date)
                 item["rqstEndDt"] = end_date
-                item["GSI3PK"] = f"{GSI3SK_PREFIX}{end_date}"
+                item["GSI3PK"] = f"{GSI3PK_PREFIX}{end_date}"
 
             batch.put_item(Item=item)
     return no_stages
@@ -966,7 +1019,6 @@ def group_contiguous_requests(contiguous_request, current_request):
                             "correlation_id": req_record.get("correlation_id"),
                             "switch_addresses": req_record.get("switch_addresses"),
                             "crrltnId": existing_record.get("crrltnId"),
-                            "sub_id": req_record.get("sub_id"),
                         }
                     ],
                 }
@@ -986,7 +1038,6 @@ def group_contiguous_requests(contiguous_request, current_request):
                         "correlation_id": correlation_id,
                         "switch_addresses": switch_addresses,
                         "crrltnId": crrltn_id,
-                        "sub_id": req_record.get("sub_id"),
                     }
                 )
 
@@ -1003,7 +1054,6 @@ def group_contiguous_requests(contiguous_request, current_request):
                     "site": site,
                     "correlation_id": correlation_id,
                     "switch_addresses": switch_addresses,
-                    "sub_id": req_record.get("sub_id"),
                 }
             )
     dispatched_data = []
@@ -1078,6 +1128,8 @@ def get_contiguous_request(request: dict, cancel_req=False):
 
     items: list = []
     last_evaluated_key: Optional[dict] = None
+    sites = []
+    meters = []
 
     # Requests for:
     # - the same site and meter serial number
@@ -1089,19 +1141,18 @@ def get_contiguous_request(request: dict, cancel_req=False):
         # The maximum number of operands for the IN comparator is 100 in dynamoDB
         if item_len % 100 != 0:
             item_len += 100
-        site_switch_crl_id = request["site_switch_crl_id"]
-        gsi3pk = list(
-            map(
-                lambda x: f"{GSI3PK_PREFIX}{x['site']}#{x['switch_addresses']}",
-                site_switch_crl_id,
-            )
-        )
+        site_switch_crl_ids = request["site_switch_crl_id"]
+        for site_switch_crl_id in site_switch_crl_ids:
+            sites.append(site_switch_crl_id["site"])
+            meters.append(site_switch_crl_id["switch_addresses"])
+
     else:
         item_len = 100
-        gsi3pk = [f"{GSI3PK_PREFIX}{site}#{switch_addresses}"]
+        sites.append(request["site"])
+        meters.append(request["switch_addresses"])
 
     # Should be in ISO format.
-    gsi3sk: str = f"{GSI3SK_PREFIX}{start_datetime}"
+    gsi3pk: str = f"{GSI3PK_PREFIX}{start_datetime}"
 
     stages: list = [
         Stage.POLICY_CREATED.value,
@@ -1124,10 +1175,9 @@ def get_contiguous_request(request: dict, cancel_req=False):
                 response: dict = REQUEST_TRACKER_TABLE.query(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    KeyConditionExpression=Key("GSI3PK").eq(gsi3sk),
-                    FilterExpression=Attr("GSI3SK").is_in(
-                        gsi3pk[i * 100 : i * 100 + 100]
-                    )
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
+                    FilterExpression=Attr("site").is_in(sites[i * 100 : i * 100 + 100])
+                    & Attr("mtrSrlNo").is_in(meters[i * 100 : i * 100 + 100])
                     & Attr("svcName").eq(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                     ExclusiveStartKey=last_evaluated_key,
@@ -1138,10 +1188,9 @@ def get_contiguous_request(request: dict, cancel_req=False):
                 response: dict = REQUEST_TRACKER_TABLE.query(
                     ProjectionExpression="overrdValue, original_start_datetime, rqstStrtDt, rqstEndDt, crrltnId, mtrSrlNo",
                     IndexName="GSI3",
-                    KeyConditionExpression=Key("GSI3PK").eq(gsi3sk),
-                    FilterExpression=Attr("GSI3SK").is_in(
-                        gsi3pk[i * 100 : i * 100 + 100]
-                    )
+                    KeyConditionExpression=Key("GSI3PK").eq(gsi3pk),
+                    FilterExpression=Attr("site").is_in(sites[i * 100 : i * 100 + 100])
+                    & Attr("mtrSrlNo").is_in(meters[i * 100 : i * 100 + 100])
                     & Attr("svcName").gte(LOAD_CONTROL_SERVICE_NAME)
                     & Attr("currentStg").is_in(stages),
                 )
