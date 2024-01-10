@@ -420,7 +420,7 @@ def update_header_record(
         expression_attribute_names["#GSI3PK"] = "GSI3PK"
         expression_attribute_values[
             ":val10"
-        ] = f"{GSI3SK_PREFIX}{request_end_date.isoformat()}"
+        ] = f"{GSI3PK_PREFIX}{request_end_date.isoformat()}"
 
     if extended_by:
         update_expression += ", #extnddBy = :val11"
