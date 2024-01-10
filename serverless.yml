@@ -38,6 +38,13 @@ provider:
   name: aws
   runtime: python3.8
   region: ap-south-1
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - states:*
+        - dynamodb:*
+        - sqs:*
+      Resource: "*"
   layers:
     - Ref: PythonRequirementsLambdaLayer
   tracing:
@@ -65,7 +72,7 @@ functions:
     description: "State machine handler for dlc override requests."
     memorySize: 1024 # optional, in MB, default is 1024
     timeout: 600 # optional, in seconds, default is 6
-    role: LoadControlOperationsRole
+    # role: LoadControlOperationsRole
     environment:
       REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
       DEFAULT_OVERRIDE_DURATION_MINUTES: 30
@@ -77,7 +84,7 @@ functions:
     description: "API gateway handler for dlc override requests."
     memorySize: 1024 # optional, in MB, default is 1024
     timeout: 25 # optional, in seconds, default is 6
-    role: LoadControlOverrideApiGwRole
+    # role: LoadControlOverrideApiGwRole
     events:
       - http:
           path: /service/lc/load/{subscription_id+}
@@ -93,7 +100,7 @@ functions:
     description: "Throttling enforcer for dlc override requests."
     memorySize: 2048
     timeout: 180  # 3 minutes
-    role: DlcOverrideThrottleRole
+    # role: DlcOverrideThrottleRole
     events:
       - sqs:
           arn: arn:aws:sqs:ap-south-1:752671163579:load-control-throttle-queue
@@ -115,7 +122,7 @@ functions:
     description: "API gateway handler for dlc get status requests."
     memorySize: 1024 # optional, in MB, default is 1024
     timeout: 25 # optional, in seconds, default is 6
-    role: LoadControlGetRequestStatusRole
+    # role: LoadControlGetRequestStatusRole
     events:
       - http:
           path: /service/lc/status/{correlation_id+}
@@ -129,7 +136,7 @@ functions:
     description: "API gateway handler for cancel dlc override requests."
     memorySize: 1024 # optional, in MB, default is 1024
     timeout: 25 # optional, in seconds, default is 6
-    role: LoadControlCancelRequestRole
+    # role: LoadControlCancelRequestRole
     events:
       - http:
           path: /service/lc/cancel/{subscription_id}
@@ -155,7 +162,7 @@ functions:
     description: "State machine handler for cancelling dlc override requests."
     memorySize: 1024 # optional, in MB, default is 1024
     timeout: 25 # optional, in seconds, default is 6
-    role: LoadControlCancelRequestRole
+    # role: LoadControlCancelRequestRole
     environment:
       DLC_OVERRIDE_SM_EXECUTION_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:poc-processors-sm
       REQUEST_TRACKER_TABLE_NAME: ${self:custom.REQUEST_TRACKER_TABLE_NAME}
@@ -171,13 +178,13 @@ stepFunctions:
       name: poc-cancel-override-processors-sm
       definition: ${file(src/resources/sm/dlc-cancel-override-sm.json)}
 
-resources:
-  - ${file(src/resources/cloudformation/roles/load_control_operations_role.yml)}
-  - ${file(src/resources/cloudformation/roles/load_control_cancel_request_role.yml)}
-  - ${file(src/resources/cloudformation/roles/load_control_override_apigw_role.yml)}
-  - ${file(src/resources/cloudformation/roles/load_control_get_request_status_role.yml)}
-  - ${file(src/resources/cloudformation/roles/load_control_override_throttle_role.yml)}
-  # - ${file(src/resources/cloudformation/sqs/load_control_override_throttle_queue.yml)}
+# resources:
+#   - ${file(src/resources/cloudformation/roles/load_control_operations_role.yml)}
+#   - ${file(src/resources/cloudformation/roles/load_control_cancel_request_role.yml)}
+#   - ${file(src/resources/cloudformation/roles/load_control_override_apigw_role.yml)}
+#   - ${file(src/resources/cloudformation/roles/load_control_get_request_status_role.yml)}
+#   - ${file(src/resources/cloudformation/roles/load_control_override_throttle_role.yml)}
+#   # - ${file(src/resources/cloudformation/sqs/load_control_override_throttle_queue.yml)}
 
 
 plugins:
@@ -185,4 +192,4 @@ plugins:
   - serverless-plugin-common-excludes
   - serverless-step-functions
   - serverless-prune-plugin
-  - serverless-iam-roles-per-function
+  # - serverless-iam-roles-per-function

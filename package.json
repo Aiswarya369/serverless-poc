@@ -3,7 +3,7 @@
   "description": "",
   "version": "1.1.0",
   "devDependencies": {
-    "serverless": "^3.35.2",
+    "serverless": "^3.38.0",
     "serverless-iam-roles-per-function": "^3.2.0",
     "serverless-plugin-common-excludes": "^4.0.0",
     "serverless-prune-plugin": "^2.0.1",
